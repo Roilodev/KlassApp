@@ -218,15 +218,6 @@ export function StudentManagement({
             role="dialog"
             tabIndex={-1}
           >
-            <button
-              aria-label="Fechar cadastro de aluno"
-              className="profile-close"
-              disabled={submitting}
-              onClick={() => setIsFormOpen(false)}
-              type="button"
-            >
-              ×
-            </button>
             <div className="class-panel-heading">
               <div className="setup-icon" aria-hidden="true">♧</div>
               <div>
@@ -358,9 +349,14 @@ export function StudentManagement({
               Os contatos ficam separados por escola. Não associamos responsáveis
               automaticamente entre alunos ou escolas pelo número de telefone.
             </p>
-            <button className="class-submit student-submit" disabled={submitting} type="submit">
-              {submitting ? "Salvando..." : "Cadastrar aluno"}
-            </button>
+            <div className="dialog-form-actions student-submit">
+              <button className="class-submit" disabled={submitting} type="submit">
+                {submitting ? "Salvando..." : "Cadastrar aluno"}
+              </button>
+              <button className="class-cancel-edit" disabled={submitting} onClick={() => setIsFormOpen(false)} type="button">
+                Fechar
+              </button>
+            </div>
             </form>
             {error && <p className="form-message form-error" role="alert">{error}</p>}
           </section>

@@ -369,9 +369,14 @@ export function EventManagement({ initialEvents, classes, schoolName }: EventMan
             <p className="privacy-note event-notice">
               O evento ficará visível nesta área da administração. Ainda não há portal dos responsáveis nem envio de mensagens por WhatsApp.
             </p>
-            <button className="class-submit event-submit" disabled={submitting} type="submit">
-              {submitting ? "Publicando..." : "Publicar evento"}
-            </button>
+            <div className="dialog-form-actions">
+              <button className="class-submit event-submit" disabled={submitting} type="submit">
+                {submitting ? "Publicando..." : "Publicar evento"}
+              </button>
+              <button className="class-cancel-edit" disabled={submitting} onClick={() => setIsFormOpen(false)} type="button">
+                Fechar
+              </button>
+            </div>
           </form>
           {error && <p className="form-message form-error" role="alert">{error}</p>}
         </EntryFormDialog>
@@ -448,7 +453,7 @@ export function EventManagement({ initialEvents, classes, schoolName }: EventMan
               onClick={() => void closePresentation()}
               type="button"
             >
-              <span aria-hidden="true">×</span> Sair do painel
+              Fechar
             </button>
           </div>
           <header className="event-presentation-heading">

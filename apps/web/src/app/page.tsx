@@ -41,6 +41,14 @@ interface DashboardSummary {
   activeAssignedTeachers: number | null;
 }
 
+interface NextEvent {
+  title: string;
+  startsAt: string;
+  location: string;
+  audienceLabel: string;
+  timeZone: string;
+}
+
 interface SetupProgressItem {
   label: string;
   href: string;
@@ -59,6 +67,31 @@ async function getDashboardSummary(headers: { cookie: string }): Promise<Dashboa
     throw new Error("Não foi possível carregar as quantidades dos registros.");
   }
   return response.json() as Promise<DashboardSummary>;
+}
+
+async function getNextEvent(headers: { cookie: string }): Promise<NextEvent | null> {
+  const response = await fetch(`${apiUrl}/events/next`, {
+    headers,
+    cache: "no-store",
+  });
+  if (response.status === 401 || response.status === 403) {
+    redirect("/login");
+  }
+  if (!response.ok) {
+    throw new Error("Não foi possível carregar o próximo evento.");
+  }
+  return response.json() as Promise<NextEvent | null>;
+}
+
+function formatNextEventDate(event: NextEvent): string {
+  return new Date(event.startsAt).toLocaleString("pt-BR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: event.timeZone,
+  });
 }
 
 function getSetupProgress(summary: DashboardSummary): SetupProgressItem[] {
@@ -111,7 +144,11 @@ export default function Home() {
 async function Dashboard() {
   const session = await getSession();
   const cookieStore = await cookies();
-  const summary = await getDashboardSummary({ cookie: cookieStore.toString() });
+  const headers = { cookie: cookieStore.toString() };
+  const [summary, nextEvent] = await Promise.all([
+    getDashboardSummary(headers),
+    getNextEvent(headers),
+  ]);
   const setupItems = session.school.role === "admin"
     ? getSetupProgress(summary)
     : [];
@@ -194,21 +231,42 @@ async function Dashboard() {
         </header>
 
         <section className="welcome-section dashboard-hero">
-          <div>
-            <p className="eyebrow">UM NOVO DIA, MUITAS POSSIBILIDADES <span aria-hidden="true">✦</span></p>
-            <h1>Sua escola floresce<br />em cada detalhe.</h1>
-            <p className="welcome-copy">
-              Um lugar para acompanhar quem aprende, quem ensina e tudo o que acontece pelo caminho.
-            </p>
-            <div className="dashboard-hero-actions">
-              <Link className="dashboard-hero-primary" href="/alunos">
-                Conhecer os alunos <span aria-hidden="true">↗</span>
-              </Link>
-              <span className="dashboard-hero-school">
-                <span aria-hidden="true">✿</span> {session.school.name}
-              </span>
+          {nextEvent ? (
+            <div>
+              <p className="eyebrow">PRÓXIMO EVENTO <span aria-hidden="true">✦</span></p>
+              <h1>{nextEvent.title}</h1>
+              <p className="welcome-copy">
+                {formatNextEventDate(nextEvent)}
+                {nextEvent.location ? ` · ${nextEvent.location}` : ""}
+              </p>
+              <div className="dashboard-hero-actions">
+                {session.school.role === "admin" && (
+                  <Link className="dashboard-hero-primary" href="/eventos">
+                    Ver eventos <span aria-hidden="true">↗</span>
+                  </Link>
+                )}
+                <span className="dashboard-hero-school">
+                  <span aria-hidden="true">✿</span> {nextEvent.audienceLabel}
+                </span>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div>
+              <p className="eyebrow">UM NOVO DIA, MUITAS POSSIBILIDADES <span aria-hidden="true">✦</span></p>
+              <h1>Sua escola floresce<br />em cada detalhe.</h1>
+              <p className="welcome-copy">
+                Um lugar para acompanhar quem aprende, quem ensina e tudo o que acontece pelo caminho.
+              </p>
+              <div className="dashboard-hero-actions">
+                <Link className="dashboard-hero-primary" href="/alunos">
+                  Conhecer os alunos <span aria-hidden="true">↗</span>
+                </Link>
+                <span className="dashboard-hero-school">
+                  <span aria-hidden="true">✿</span> {session.school.name}
+                </span>
+              </div>
+            </div>
+          )}
           <svg
             aria-hidden="true"
             className="dashboard-hero-illustration"

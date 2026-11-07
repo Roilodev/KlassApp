@@ -21,6 +21,16 @@ import type { CreateEventInput } from './events.service.js';
 export class EventsController {
   constructor(private readonly events: EventsService) {}
 
+  @Get('next')
+  @SchoolRoles('admin', 'teacher')
+  next(@Req() request: AuthenticatedRequest) {
+    return this.events.nextFor(
+      request.user.schoolId,
+      request.user.id,
+      request.user.role,
+    );
+  }
+
   @Get()
   list(@Req() request: AuthenticatedRequest) {
     return this.events.list(request.user.schoolId);

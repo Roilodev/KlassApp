@@ -265,9 +265,14 @@ export function AssessmentManagement({
                 value={maxPoints}
               />
             </label>
-            <button className="class-submit assessment-submit" disabled={submitting} type="submit">
-              {submitting ? "Salvando..." : "Cadastrar avaliação"}
-            </button>
+            <div className="dialog-form-actions">
+              <button className="class-submit assessment-submit" disabled={submitting} type="submit">
+                {submitting ? "Salvando..." : "Cadastrar avaliação"}
+              </button>
+              <button className="class-cancel-edit" disabled={submitting} onClick={() => setIsFormOpen(false)} type="button">
+                Fechar
+              </button>
+            </div>
           </form>
           {error && <p className="form-message form-error" role="alert">{error}</p>}
         </EntryFormDialog>
@@ -321,16 +326,6 @@ export function AssessmentManagement({
                 {" "}pontuação máxima: {selectedAssessment.maxPoints}
               </p>
             </div>
-            <button
-              className="assessment-close-button"
-              onClick={() => {
-                setSelectedAssessment(null);
-                setStudents([]);
-              }}
-              type="button"
-            >
-              Fechar
-            </button>
           </div>
           {loadingResults ? (
             <p className="assessment-loading">Carregando os alunos...</p>
@@ -377,6 +372,18 @@ export function AssessmentManagement({
               ))}
             </ul>
           )}
+          <div className="class-details-actions">
+            <button
+              className="assessment-close-button"
+              onClick={() => {
+                setSelectedAssessment(null);
+                setStudents([]);
+              }}
+              type="button"
+            >
+              Fechar
+            </button>
+          </div>
         </section>
       )}
     </>

@@ -31,17 +31,37 @@ async function getClasses(): Promise<SchoolClass[]> {
     redirect("/");
   }
 
-  const response = await fetch(`${apiUrl}/school-structure/classes`, {
-    headers,
-    cache: "no-store",
-  });
-  if (response.status === 401 || response.status === 403) {
+  const [classesResponse, rostersResponse] = await Promise.all([
+    fetch(`${apiUrl}/school-structure/classes`, { headers, cache: "no-store" }),
+    fetch(`${apiUrl}/school-structure/classes/rosters`, { headers, cache: "no-store" }),
+  ]);
+  if (
+    classesResponse.status === 401 ||
+    classesResponse.status === 403 ||
+    rostersResponse.status === 401 ||
+    rostersResponse.status === 403
+  ) {
     redirect("/login");
   }
-  if (!response.ok) {
+  if (!classesResponse.ok || !rostersResponse.ok) {
     throw new Error("Não foi possível carregar as turmas.");
   }
-  return response.json() as Promise<SchoolClass[]>;
+  const [classes, rosters] = await Promise.all([
+    classesResponse.json() as Promise<SchoolClass[]>,
+    rostersResponse.json() as Promise<Array<{
+      classId: string;
+      students: NonNullable<SchoolClass["students"]>;
+      teachers: NonNullable<SchoolClass["teachers"]>;
+    }>>,
+  ]);
+  const rostersByClass = new Map(
+    rosters.map((roster) => [roster.classId, roster]),
+  );
+  return classes.map((schoolClass) => ({
+    ...schoolClass,
+    students: rostersByClass.get(schoolClass.id)?.students ?? [],
+    teachers: rostersByClass.get(schoolClass.id)?.teachers ?? [],
+  }));
 }
 
 export default function ClassesPage() {

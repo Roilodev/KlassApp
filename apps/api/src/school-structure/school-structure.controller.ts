@@ -26,6 +26,11 @@ export class SchoolStructureController {
     return this.schoolStructure.listClasses(request.user.schoolId);
   }
 
+  @Get('classes/rosters')
+  listClassRosters(@Req() request: AuthenticatedRequest) {
+    return this.schoolStructure.listClassRosters(request.user.schoolId);
+  }
+
   @Post('classes')
   createClass(
     @Req() request: AuthenticatedRequest,

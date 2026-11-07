@@ -791,8 +791,30 @@ h1 span {
   gap: 8px;
 }
 
-.class-cancel-edit,
-.class-edit-button {
+.dialog-form-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 14px;
+}
+
+.dialog-form-actions .class-submit {
+  margin: 0;
+  justify-self: auto;
+}
+
+.class-edit-dialog-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.class-edit-dialog-form .class-form-actions {
+  grid-column: 1 / -1;
+}
+
+.class-cancel-edit {
   min-height: 36px;
   padding: 0 12px;
   border: 1px solid #e4e3ec;
@@ -2113,13 +2135,191 @@ h1 span {
 }
 
 .people-card-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
 
 .people-card-grid > li {
   max-width: 320px;
   min-width: 0;
+}
+
+.class-card-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: 12px;
+}
+
+.class-grade-groups {
+  display: grid;
+  gap: 24px;
+}
+
+.class-grade-group > h3 {
+  margin: 0 0 11px;
+  color: #455168;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 19px;
+}
+
+.class-card-grid .class-list-item {
+  min-width: 0;
+  padding: 0;
+  border: 1px solid #eee8df;
+  border-radius: 13px;
+  background: #fffefa;
+  overflow: hidden;
+}
+
+.class-card-button {
+  display: flex;
+  width: 100%;
+  min-height: 84px;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.class-card-button:focus-visible {
+  outline: 3px solid rgb(128 104 220 / 55%);
+  outline-offset: -3px;
+}
+
+.class-card-grid .class-list-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.class-card-grid .class-list-copy strong {
+  overflow-wrap: anywhere;
+}
+
+.class-card-grid .class-list-tag {
+  margin-left: 0;
+  white-space: nowrap;
+}
+
+.class-details {
+  margin-top: 22px;
+}
+
+.class-details > section + section {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 2px solid #d8cbb8;
+}
+
+.class-details-roster-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid #433a32;
+  border-radius: 9px;
+  background: #433a32;
+}
+
+.class-details-roster-heading h3 {
+  margin: 0;
+  color: #fffaf2;
+  font-size: 16px;
+}
+
+.class-details-roster-heading span {
+  display: grid;
+  min-width: 25px;
+  height: 25px;
+  place-items: center;
+  padding: 0 6px;
+  border-radius: 99px;
+  background: #f5ead8;
+  color: #433a32;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.class-details-roster {
+  display: grid;
+  max-height: min(42vh, 360px);
+  gap: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.class-details-roster li {
+  padding: 11px 4px;
+  border-bottom: 1px solid #f2eee8;
+  color: #596579;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.class-details-empty {
+  margin: 14px 0 0;
+  color: #8a91a0;
+  font-size: 14px;
+}
+
+.class-details-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
+.profile-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #eee2d1;
+}
+
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+
+  .profile-backdrop:has(.class-details-print-dialog) {
+    position: static;
+    display: block;
+    overflow: visible;
+    padding: 0;
+    background: white;
+  }
+
+  .class-details-print-dialog,
+  .class-details-print-dialog * {
+    visibility: visible !important;
+  }
+
+  .class-details-print-dialog {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+    max-height: none;
+    overflow: visible;
+    padding: 0;
+    border: 0;
+    box-shadow: none;
+  }
+
+  .class-details-print-dialog .class-details-actions {
+    display: none !important;
+  }
+
+  .class-details-print-dialog .class-details-roster {
+    max-height: none;
+    overflow: visible;
+  }
 }
 
 .people-search {
@@ -2191,10 +2391,6 @@ h1 span {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.6px;
-}
-
-.class-edit-button {
-  min-height: 30px;
 }
 
 .teacher-form {
@@ -2377,8 +2573,7 @@ h1 span {
 .person-list-button:focus-visible,
 .profile-link-button:focus-visible,
 .person-photo-actions button:focus-visible,
-.camera-capture button:focus-visible,
-.profile-close:focus-visible {
+.camera-capture button:focus-visible {
   outline: 2px solid #8068dc;
   outline-offset: 2px;
 }
@@ -2666,20 +2861,6 @@ h1 span {
 
 .student-entry-dialog {
   width: min(900px, 100%);
-}
-
-.profile-close {
-  position: absolute;
-  top: 14px;
-  right: 16px;
-  width: 34px;
-  height: 34px;
-  border: 0;
-  border-radius: 10px;
-  background: #f3f1fa;
-  color: #6951ca;
-  cursor: pointer;
-  font-size: 24px;
 }
 
 .person-profile-heading {
@@ -4197,11 +4378,6 @@ h1 span {
 .setup-text h2 {
   color: #3d3029;
   font-family: Georgia, "Times New Roman", serif;
-}
-
-.profile-close {
-  background: #fff0e8;
-  color: #c96e4b;
 }
 
 @media (max-width: 700px) {

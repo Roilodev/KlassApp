@@ -352,15 +352,6 @@ export function PersonProfile({
         role="dialog"
         tabIndex={-1}
       >
-        <button
-          aria-label="Fechar perfil"
-          className="profile-close"
-          disabled={saving}
-          onClick={onClose}
-          type="button"
-        >
-          ×
-        </button>
         <div className="person-profile-heading">
           <PersonPhoto
             editable={canEditPhoto}
@@ -565,6 +556,9 @@ export function PersonProfile({
               <button className="class-submit" disabled={saving} type="submit">
                 {saving ? "Salvando..." : "Salvar alterações"}
               </button>
+              <button className="profile-cancel-button" disabled={saving} onClick={onClose} type="button">
+                Fechar
+              </button>
             </div>
           </form>
         ) : studentProfile ? (
@@ -721,6 +715,13 @@ export function PersonProfile({
             </Section>
           </div>
         ) : null}
+        {!isEditing && (
+          <div className="profile-dialog-actions">
+            <button className="profile-cancel-button" disabled={saving} onClick={onClose} type="button">
+              Fechar
+            </button>
+          </div>
+        )}
       </section>
     </div>
   );

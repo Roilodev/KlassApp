@@ -202,15 +202,6 @@ export function TeacherManagement({
             role="dialog"
             tabIndex={-1}
           >
-            <button
-              aria-label="Fechar cadastro de professor"
-              className="profile-close"
-              disabled={submitting}
-              onClick={() => setIsFormOpen(false)}
-              type="button"
-            >
-              ×
-            </button>
             <div className="class-panel-heading">
               <div className="setup-icon" aria-hidden="true">♙</div>
               <div>
@@ -275,13 +266,15 @@ export function TeacherManagement({
               </div>
             </fieldset>
 
-            <button
-              className="class-submit teacher-submit"
-              disabled={submitting || selectedClasses.length === 0}
-              type="submit"
-            >
-              {submitting ? "Preparando convite..." : "Cadastrar professor"}
-            </button>
+            <div className="dialog-form-actions teacher-submit">
+              <button
+                className="class-submit"
+                disabled={submitting || selectedClasses.length === 0}
+                type="submit"
+              >
+                {submitting ? "Preparando convite..." : "Cadastrar professor"}
+              </button>
+            </div>
             </form>
             {error && <p className="form-message form-error" role="alert">{error}</p>}
             {message && <p className="form-message form-success" role="status">{message}</p>}
@@ -300,6 +293,11 @@ export function TeacherManagement({
                 <small>Compartilhe diretamente com o professor. O link só pode ser usado uma vez.</small>
               </div>
             )}
+            <div className="dialog-form-actions">
+              <button className="class-cancel-edit" disabled={submitting} onClick={() => setIsFormOpen(false)} type="button">
+                Fechar
+              </button>
+            </div>
           </section>
         </div>
       )}

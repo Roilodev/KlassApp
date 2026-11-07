@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { FormEvent } from "react";
+import { EntryFormDialog } from "../entry-form-dialog";
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -10,6 +11,8 @@ export interface SchoolClass {
   year: number;
   grade: string;
   name: string;
+  students?: Array<{ id: string; fullName: string }>;
+  teachers?: Array<{ id: string; fullName: string }>;
 }
 
 interface ClassFormProps {
@@ -25,6 +28,14 @@ export function ClassForm({ initialClasses }: ClassFormProps) {
   const [success, setSuccess] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [editingClassId, setEditingClassId] = useState<string | null>(null);
+  const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
+  const selectedClass = classes.find((schoolClass) => schoolClass.id === selectedClassId);
+  const classesByGrade = new Map<string, SchoolClass[]>();
+  for (const schoolClass of classes) {
+    const gradeClasses = classesByGrade.get(schoolClass.grade) ?? [];
+    gradeClasses.push(schoolClass);
+    classesByGrade.set(schoolClass.grade, gradeClasses);
+  }
 
   function resetForm() {
     setEditingClassId(null);
@@ -38,9 +49,20 @@ export function ClassForm({ initialClasses }: ClassFormProps) {
     setYear(String(schoolClass.year));
     setGrade(schoolClass.grade);
     setName(schoolClass.name);
+    setSelectedClassId(schoolClass.id);
     setError("");
     setSuccess("");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function openClassDetails(schoolClass: SchoolClass) {
+    setSelectedClassId(schoolClass.id);
+    setError("");
+    setSuccess("");
+  }
+
+  function closeClassDetails() {
+    setSelectedClassId(null);
+    setEditingClassId(null);
   }
 
   async function saveClass(event: FormEvent<HTMLFormElement>) {
@@ -78,10 +100,15 @@ export function ClassForm({ initialClasses }: ClassFormProps) {
         return;
       }
 
-      const createdClass = (await response.json()) as SchoolClass;
+      const savedClass = (await response.json()) as SchoolClass;
+      const existingClass = classes.find((item) => item.id === savedClass.id);
+      const updatedClass = {
+        ...savedClass,
+        students: savedClass.students ?? existingClass?.students ?? [],
+      };
       setClasses((current) => [
-        createdClass,
-        ...current.filter((item) => item.id !== createdClass.id),
+        updatedClass,
+        ...current.filter((item) => item.id !== updatedClass.id),
       ].sort((a, b) => b.year - a.year || a.grade.localeCompare(b.grade) || a.name.localeCompare(b.name)));
       const wasEditing = Boolean(editingClassId);
       resetForm();
@@ -100,7 +127,7 @@ export function ClassForm({ initialClasses }: ClassFormProps) {
           <div className="setup-icon" aria-hidden="true">✎</div>
           <div>
             <p className="card-kicker">ORGANIZAÇÃO ESCOLAR</p>
-            <h2 id="create-class-title">{editingClassId ? "Edite a turma" : "Cadastre uma turma"}</h2>
+            <h2 id="create-class-title">Cadastre uma turma</h2>
             <p>Exemplo: ano escolar 4º ano, turma A.</p>
           </div>
         </div>
@@ -139,9 +166,130 @@ export function ClassForm({ initialClasses }: ClassFormProps) {
           </label>
           <div className="class-form-actions">
             <button className="class-submit" disabled={submitting} type="submit">
-              {submitting ? "Salvando..." : editingClassId ? "Salvar alterações" : "Cadastrar turma"}
+              {submitting ? "Salvando..." : "Cadastrar turma"}
             </button>
-            {editingClassId && (
+          </div>
+        </form>
+
+        {error && <p className="form-message form-error" role="alert">{error}</p>}
+        {success && <p className="form-message form-success" role="status">{success}</p>}
+      </section>
+
+      {selectedClass && !editingClassId && (
+        <EntryFormDialog
+          description={`Ano letivo ${selectedClass.year}`}
+          eyebrow="DETALHES DA TURMA"
+          icon="▦"
+          isBusy={false}
+          onClose={closeClassDetails}
+          className="class-details-print-dialog"
+          title={`${selectedClass.grade} · Turma ${selectedClass.name}`}
+          titleId="class-details-title"
+        >
+          <div className="class-details">
+            <section aria-labelledby="class-roster-title">
+              <div className="class-details-roster-heading">
+                <h3 id="class-roster-title">Alunos</h3>
+                <span>{selectedClass.students?.length ?? 0}</span>
+              </div>
+              {selectedClass.students?.length ? (
+                <ul className="class-details-roster">
+                  {selectedClass.students.map((student) => (
+                    <li key={student.id}>{student.fullName}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="class-details-empty">Nenhum aluno matriculado nesta turma.</p>
+              )}
+            </section>
+            <section aria-labelledby="class-teachers-title">
+              <div className="class-details-roster-heading">
+                <h3 id="class-teachers-title">Professores</h3>
+                <span>{selectedClass.teachers?.length ?? 0}</span>
+              </div>
+              {selectedClass.teachers?.length ? (
+                <ul className="class-details-roster">
+                  {selectedClass.teachers.map((teacher) => (
+                    <li key={teacher.id}>{teacher.fullName}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="class-details-empty">Nenhum professor vinculado a esta turma.</p>
+              )}
+            </section>
+            <div className="class-details-actions">
+              <button
+                className="class-cancel-edit"
+                onClick={() => window.print()}
+                type="button"
+              >
+                Imprimir
+              </button>
+              <button
+                className="class-submit"
+                onClick={() => editClass(selectedClass)}
+                type="button"
+              >
+                Editar turma
+              </button>
+              <button
+                className="class-cancel-edit"
+                onClick={closeClassDetails}
+                type="button"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </EntryFormDialog>
+      )}
+
+      {selectedClass && editingClassId && (
+        <EntryFormDialog
+          description="Atualize os dados da turma. Se já houver matrículas ou avaliações, o ano letivo não poderá ser alterado."
+          eyebrow="ORGANIZAÇÃO ESCOLAR"
+          icon="✎"
+          isBusy={submitting}
+          onClose={closeClassDetails}
+          title="Editar turma"
+          titleId="edit-class-title"
+        >
+          <form className="class-form class-edit-dialog-form" onSubmit={saveClass}>
+            <label>
+              Ano letivo
+              <input
+                max="2200"
+                min="2000"
+                onChange={(event) => setYear(event.target.value)}
+                required
+                type="number"
+                value={year}
+              />
+            </label>
+            <label>
+              Ano escolar
+              <input
+                maxLength={80}
+                onChange={(event) => setGrade(event.target.value)}
+                placeholder="Ex.: 4º ano"
+                required
+                value={grade}
+              />
+            </label>
+            <label>
+              Turma
+              <input
+                maxLength={40}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Ex.: A"
+                required
+                value={name}
+              />
+            </label>
+            <div className="class-form-actions">
+              <button className="class-submit" disabled={submitting} type="submit">
+                {submitting ? "Salvando..." : "Salvar alterações"}
+              </button>
               <button
                 className="class-cancel-edit"
                 disabled={submitting}
@@ -150,18 +298,19 @@ export function ClassForm({ initialClasses }: ClassFormProps) {
               >
                 Cancelar
               </button>
-            )}
-          </div>
-          {editingClassId && (
-            <p className="class-edit-note">
-              O ano letivo não pode ser alterado se a turma já tiver matrículas ou avaliações.
-            </p>
-          )}
-        </form>
-
-        {error && <p className="form-message form-error" role="alert">{error}</p>}
-        {success && <p className="form-message form-success" role="status">{success}</p>}
-      </section>
+              <button
+                className="class-cancel-edit"
+                disabled={submitting}
+                onClick={closeClassDetails}
+                type="button"
+              >
+                Fechar
+              </button>
+            </div>
+            {error && <p className="form-message form-error" role="alert">{error}</p>}
+          </form>
+        </EntryFormDialog>
+      )}
 
       <section className="class-list-panel" aria-labelledby="classes-title">
         <div className="section-heading class-list-heading">
@@ -179,26 +328,40 @@ export function ClassForm({ initialClasses }: ClassFormProps) {
             <p>Cadastre o primeiro ano escolar e sua turma para começar.</p>
           </div>
         ) : (
-          <ul className="class-list">
-            {classes.map((schoolClass) => (
-              <li className="class-list-item" key={schoolClass.id}>
-                <span className="class-list-icon" aria-hidden="true">▦</span>
-                <span className="class-list-copy">
-                  <strong>{schoolClass.grade} · Turma {schoolClass.name}</strong>
-                  <small>Ano letivo {schoolClass.year}</small>
-                </span>
-                <span className="class-list-tag">ATIVA</span>
-                <button
-                  aria-label={`Editar turma ${schoolClass.grade} ${schoolClass.name}`}
-                  className="class-edit-button"
-                  onClick={() => editClass(schoolClass)}
-                  type="button"
+          <div className="class-grade-groups">
+            {[...classesByGrade.entries()]
+              .sort(([gradeA], [gradeB]) => gradeA.localeCompare(gradeB))
+              .map(([grade, gradeClasses]) => (
+                <section
+                  aria-labelledby={`class-grade-${grade}`}
+                  className="class-grade-group"
+                  key={grade}
                 >
-                  Editar
-                </button>
-              </li>
-            ))}
-          </ul>
+                  <h3 id={`class-grade-${grade}`}>{grade}</h3>
+                  <ul className="class-list class-card-grid">
+                    {gradeClasses.map((schoolClass) => (
+                      <li className="class-list-item" key={schoolClass.id}>
+                        <button
+                          aria-label={`Ver detalhes da turma ${schoolClass.name}, ${grade}`}
+                          className="class-card-button"
+                          onClick={() => openClassDetails(schoolClass)}
+                          type="button"
+                        >
+                          <span className="class-list-icon" aria-hidden="true">▦</span>
+                          <span className="class-list-copy">
+                            <strong>Turma {schoolClass.name}</strong>
+                            <small>Ano letivo {schoolClass.year}</small>
+                          </span>
+                          <span className="class-list-tag">
+                            {schoolClass.students?.length ?? 0} alunos
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ))}
+          </div>
         )}
       </section>
     </>

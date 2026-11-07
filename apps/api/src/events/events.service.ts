@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
+import type { SchoolRole } from '../auth/roles.decorator.js';
 import { DatabaseService } from '../database/database.service.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -96,6 +97,44 @@ const EVENT_SELECT = `SELECT school_events.id, school_events.title,
 @Injectable()
 export class EventsService {
   constructor(private readonly database: DatabaseService) {}
+
+  async nextFor(
+    schoolId: string,
+    userId: string,
+    role: SchoolRole,
+  ): Promise<SchoolEvent | null> {
+    const result = await this.database.query<EventRow>(
+      `${EVENT_SELECT}
+       WHERE school_events.school_id = $1
+         AND school_events.status = 'published'
+         AND school_events.starts_at >= now()
+         AND (
+           $3::text = 'admin'
+           OR school_events.audience_type = 'school'
+           OR EXISTS (
+             SELECT 1
+             FROM teacher_class_assignments
+             JOIN classes AS assigned_class
+               ON assigned_class.school_id = teacher_class_assignments.school_id
+              AND assigned_class.id = teacher_class_assignments.class_id
+             WHERE teacher_class_assignments.school_id = school_events.school_id
+               AND teacher_class_assignments.user_id = $2
+               AND (
+                 (school_events.audience_type = 'class'
+                   AND teacher_class_assignments.class_id = school_events.class_id)
+                 OR (school_events.audience_type = 'grade'
+                   AND assigned_class.grade_id = school_events.grade_id
+                   AND assigned_class.academic_year_id = school_events.academic_year_id)
+               )
+           )
+         )
+       ORDER BY school_events.starts_at, school_events.created_at
+       LIMIT 1`,
+      [schoolId, userId, role],
+    );
+    const event = result.rows[0];
+    return event ? mapEvent(event) : null;
+  }
 
   async list(schoolId: string): Promise<SchoolEvent[]> {
     const result = await this.database.query<EventRow>(

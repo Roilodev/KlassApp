@@ -22,6 +22,28 @@ describe('SchoolStructureService', () => {
     return { service, query, transaction };
   }
 
+  it('lists active students and assigned active teachers grouped by class', async () => {
+    const roster = {
+      classId,
+      students: [{ id: 'student-id', fullName: 'Ana Silva' }],
+      teachers: [{ id: 'teacher-id', fullName: 'João Souza' }],
+    };
+    const { service, query } = makeService(async () => ({
+      rows: [roster],
+      rowCount: 1,
+    }));
+
+    await expect(service.listClassRosters('school-id')).resolves.toEqual([roster]);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("student_enrollments.status = 'active'"),
+      ['school-id'],
+    );
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("school_memberships.is_active = true"),
+      ['school-id'],
+    );
+  });
+
   it('rejects invalid class ids before touching the database', async () => {
     const { service, transaction } = makeService(async () => ({ rows: [], rowCount: 0 }));
 

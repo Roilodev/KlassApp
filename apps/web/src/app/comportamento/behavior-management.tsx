@@ -349,13 +349,18 @@ export function BehaviorManagement({ classes, canEditPhoto }: BehaviorManagement
             <p className="privacy-note behavior-form-notice">
               Este histórico é interno e não é enviado a responsáveis. Evite diagnósticos, rótulos ou informações que não sejam necessárias para o acompanhamento escolar.
             </p>
-            <button
-              className="class-submit behavior-submit"
-              disabled={submitting || !studentId}
-              type="submit"
-            >
-              {submitting ? "Salvando..." : "Adicionar ao histórico"}
-            </button>
+            <div className="dialog-form-actions">
+              <button
+                className="class-submit behavior-submit"
+                disabled={submitting || !studentId}
+                type="submit"
+              >
+                {submitting ? "Salvando..." : "Adicionar ao histórico"}
+              </button>
+              <button className="class-cancel-edit" disabled={submitting} onClick={() => setIsFormOpen(false)} type="button">
+                Fechar
+              </button>
+            </div>
           </form>
           {error && <p className="form-message form-error" role="alert">{error}</p>}
         </EntryFormDialog>

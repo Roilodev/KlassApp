@@ -221,7 +221,14 @@ export function ScheduleManagement({
           titleId="create-schedule-title"
         >
           {classes.length === 0 ? (
-            <p>Nenhuma turma disponível.</p>
+            <>
+              <p>Nenhuma turma disponível.</p>
+              <div className="dialog-form-actions">
+                <button className="class-cancel-edit" onClick={() => setIsFormOpen(false)} type="button">
+                  Fechar
+                </button>
+              </div>
+            </>
           ) : (
             <form className="schedule-form" onSubmit={saveSchedule}>
             <label>
@@ -322,6 +329,14 @@ export function ScheduleManagement({
                   Cancelar
                 </button>
               )}
+              <button
+                className="class-cancel-edit"
+                disabled={submitting}
+                onClick={() => setIsFormOpen(false)}
+                type="button"
+              >
+                Fechar
+              </button>
             </div>
             </form>
           )}

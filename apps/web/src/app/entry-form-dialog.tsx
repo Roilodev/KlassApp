@@ -58,15 +58,6 @@ export function EntryFormDialog({
         role="dialog"
         tabIndex={-1}
       >
-        <button
-          aria-label={`Fechar ${title.toLowerCase()}`}
-          className="profile-close"
-          disabled={isBusy}
-          onClick={onClose}
-          type="button"
-        >
-          ×
-        </button>
         <div className="class-panel-heading">
           <div className="setup-icon" aria-hidden="true">{icon}</div>
           <div>

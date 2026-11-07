@@ -13,6 +13,13 @@ export interface SchoolClass {
   year: number;
   grade: string;
   name: string;
+  students?: Array<{ id: string; fullName: string }>;
+}
+
+export interface SchoolClassRoster {
+  classId: string;
+  students: Array<{ id: string; fullName: string }>;
+  teachers: Array<{ id: string; fullName: string }>;
 }
 
 export interface CreateSchoolClassInput {
@@ -68,6 +75,47 @@ export class SchoolStructureService {
         AND grades.school_id = classes.school_id
        WHERE classes.school_id = $1
        ORDER BY academic_years.year DESC, grades.name, classes.name`,
+      [schoolId],
+    );
+    return result.rows;
+  }
+
+  async listClassRosters(schoolId: string): Promise<SchoolClassRoster[]> {
+    const result = await this.database.query<SchoolClassRoster>(
+      `SELECT classes.id AS "classId",
+              COALESCE(class_students.students, '[]'::json) AS students,
+              COALESCE(class_teachers.teachers, '[]'::json) AS teachers
+       FROM classes
+       LEFT JOIN LATERAL (
+         SELECT json_agg(
+                  json_build_object('id', students.id, 'fullName', students.full_name)
+                  ORDER BY students.full_name
+                ) AS students
+         FROM student_enrollments
+         JOIN students
+           ON students.school_id = student_enrollments.school_id
+          AND students.id = student_enrollments.student_id
+         WHERE student_enrollments.school_id = classes.school_id
+           AND student_enrollments.class_id = classes.id
+           AND student_enrollments.status = 'active'
+       ) AS class_students ON true
+       LEFT JOIN LATERAL (
+         SELECT json_agg(
+                  json_build_object('id', users.id, 'fullName', users.display_name)
+                  ORDER BY users.display_name
+                ) AS teachers
+         FROM teacher_class_assignments
+         JOIN school_memberships
+           ON school_memberships.school_id = teacher_class_assignments.school_id
+          AND school_memberships.user_id = teacher_class_assignments.user_id
+          AND school_memberships.role = 'teacher'
+          AND school_memberships.is_active = true
+         JOIN users ON users.id = school_memberships.user_id
+         WHERE teacher_class_assignments.school_id = classes.school_id
+           AND teacher_class_assignments.class_id = classes.id
+       ) AS class_teachers ON true
+       WHERE classes.school_id = $1
+       `,
       [schoolId],
     );
     return result.rows;

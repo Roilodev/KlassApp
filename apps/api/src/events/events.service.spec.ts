@@ -28,6 +28,42 @@ function makeService(
 }
 
 describe('EventsService', () => {
+  it('returns the next published event for the school and teacher audience', async () => {
+    const { service, query } = makeService(async () => ({
+      rows: [{
+        id: eventId,
+        title: validClassEvent.title,
+        description: validClassEvent.description,
+        starts_at: new Date(validClassEvent.startsAt),
+        location: validClassEvent.location,
+        audience_type: 'class',
+        audience_label: '4º ano · Turma A · 2026',
+        time_zone: 'America/Sao_Paulo',
+        status: 'published',
+        created_at: new Date(validClassEvent.startsAt),
+      }],
+      rowCount: 1,
+    }));
+
+    await expect(service.nextFor('school-id', 'teacher-id', 'teacher')).resolves.toMatchObject({
+      id: eventId,
+      title: validClassEvent.title,
+      audienceType: 'class',
+    });
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("school_events.starts_at >= now()"),
+      ['school-id', 'teacher-id', 'teacher'],
+    );
+    expect(query.mock.calls[0]?.[0]).toContain('teacher_class_assignments');
+    expect(query.mock.calls[0]?.[0]).toContain('ORDER BY school_events.starts_at');
+  });
+
+  it('returns null when there is no upcoming event', async () => {
+    const { service } = makeService(async () => ({ rows: [], rowCount: 0 }));
+
+    await expect(service.nextFor('school-id', 'user-id', 'admin')).resolves.toBeNull();
+  });
+
   it.each([
     ['blank title', { ...validClassEvent, title: '   ' }],
     ['invalid date', { ...validClassEvent, startsAt: 'not-a-date' }],
