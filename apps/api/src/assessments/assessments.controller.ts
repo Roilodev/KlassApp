@@ -4,6 +4,7 @@ import {
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   Put,
   Req,
@@ -16,6 +17,7 @@ import { AssessmentsService } from './assessments.service.js';
 import type {
   CreateAssessmentInput,
   RecordAssessmentResultInput,
+  UpdateAssessmentInput,
 } from './assessments.service.js';
 
 @Controller('assessments')
@@ -55,6 +57,24 @@ export class AssessmentsController {
       request.user.id,
       request.user.role,
       body as CreateAssessmentInput,
+    );
+  }
+
+  @Patch(':id')
+  update(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') assessmentId: string,
+    @Body() body: unknown,
+  ) {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      throw new BadRequestException('Informe os dados da avaliação.');
+    }
+    return this.assessments.update(
+      request.user.schoolId,
+      request.user.id,
+      request.user.role,
+      assessmentId,
+      body as UpdateAssessmentInput,
     );
   }
 

@@ -25,7 +25,10 @@ export interface SchoolEvent {
   audienceType: AudienceType;
   audienceLabel: string;
   timeZone: string;
-  status: "published" | "cancelled";
+  classId: string | null;
+  grade: string | null;
+  year: number | null;
+  status: "draft" | "published" | "cancelled";
   createdAt: string;
 }
 
@@ -52,6 +55,23 @@ function formatEventDate(value: string, timeZone: string) {
     timeStyle: "short",
     timeZone,
   });
+}
+
+function toLocalDateTimeInput(value: string, timeZone: string) {
+  const parts = new Map(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(new Date(value))
+      .map((part) => [part.type, part.value]),
+  );
+  return `${parts.get("year")}-${parts.get("month")}-${parts.get("day")}T${parts.get("hour")}:${parts.get("minute")}`;
 }
 
 function eventDateParts(value: string, timeZone: string) {
@@ -92,13 +112,16 @@ export function EventManagement({ initialEvents, classes, schoolName }: EventMan
   );
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+  const [submittingStatus, setSubmittingStatus] = useState<"draft" | "published" | null>(null);
   const [cancellingId, setCancellingId] = useState("");
+  const [publishingId, setPublishingId] = useState("");
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [isPresentationOpen, setIsPresentationOpen] = useState(false);
   const [presentationError, setPresentationError] = useState("");
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   const presentationRef = useRef<HTMLElement>(null);
+  const submitting = submittingStatus !== null;
 
   const upcomingEvents = events
     .filter((schoolEvent) =>
@@ -108,6 +131,10 @@ export function EventManagement({ initialEvents, classes, schoolName }: EventMan
     .sort((left, right) =>
       new Date(left.startsAt).getTime() - new Date(right.startsAt).getTime(),
     );
+  const sortedEvents = [...events].sort(
+    (left, right) =>
+      new Date(left.startsAt).getTime() - new Date(right.startsAt).getTime(),
+  );
 
   useEffect(() => {
     if (!isPresentationOpen) return;
@@ -153,14 +180,21 @@ export function EventManagement({ initialEvents, classes, schoolName }: EventMan
     event.preventDefault();
     setError("");
     setMessage("");
-    setSubmitting(true);
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    const status =
+      submitter instanceof HTMLButtonElement && submitter.value === "draft"
+        ? "draft"
+        : "published";
+    setSubmittingStatus(status);
 
     try {
       const selectedGrade = gradeAudiences.find(
         (audience) => JSON.stringify([audience.year, audience.grade]) === gradeKey,
       );
-      const response = await fetch(`${apiUrl}/events`, {
-        method: "POST",
+      const response = await fetch(
+        editingId ? `${apiUrl}/events/${editingId}` : `${apiUrl}/events`,
+        {
+        method: editingId ? "PATCH" : "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -169,30 +203,95 @@ export function EventManagement({ initialEvents, classes, schoolName }: EventMan
           startsAt,
           location,
           audienceType,
+          ...(!editingId ? { status } : {}),
           ...(audienceType === "class"
             ? { classId }
             : audienceType === "grade"
               ? { grade: selectedGrade?.grade, year: selectedGrade?.year }
               : {}),
         }),
+        },
+      );
+      if (!response.ok) {
+        await showRequestError(
+          response,
+          setError,
+          editingId
+            ? "Não foi possível atualizar o evento."
+            : status === "draft"
+              ? "Não foi possível guardar o evento."
+              : "Não foi possível publicar o evento.",
+        );
+        return;
+      }
+
+      const saved = (await response.json()) as SchoolEvent;
+      setEvents((current) =>
+        editingId
+          ? current.map((item) => (item.id === saved.id ? saved : item))
+          : [saved, ...current],
+      );
+      setTitle("");
+      setDescription("");
+      setStartsAt("");
+      setLocation("");
+      setEditingId(null);
+      setIsFormOpen(false);
+      setMessage(
+        editingId
+          ? "Evento atualizado."
+          : status === "draft"
+            ? "Evento salvo como rascunho."
+            : "Evento registrado na agenda da escola.",
+      );
+    } catch {
+      setError("Não foi possível conectar à KlassApp. Verifique se a API está iniciada.");
+    } finally {
+      setSubmittingStatus(null);
+    }
+  }
+
+  function editEvent(schoolEvent: SchoolEvent) {
+    setError("");
+    setMessage("");
+    setEditingId(schoolEvent.id);
+    setTitle(schoolEvent.title);
+    setDescription(schoolEvent.description);
+    setStartsAt(toLocalDateTimeInput(schoolEvent.startsAt, schoolEvent.timeZone));
+    setLocation(schoolEvent.location);
+    setAudienceType(schoolEvent.audienceType);
+    setClassId(schoolEvent.classId ?? "");
+    setGradeKey(
+      schoolEvent.grade && schoolEvent.year
+        ? JSON.stringify([schoolEvent.year, schoolEvent.grade])
+        : "",
+    );
+    setIsFormOpen(true);
+  }
+
+  async function publishEvent(schoolEvent: SchoolEvent) {
+    setError("");
+    setMessage("");
+    setPublishingId(schoolEvent.id);
+    try {
+      const response = await fetch(`${apiUrl}/events/${schoolEvent.id}/publish`, {
+        method: "POST",
+        credentials: "include",
       });
       if (!response.ok) {
         await showRequestError(response, setError, "Não foi possível publicar o evento.");
         return;
       }
-
-      const created = (await response.json()) as SchoolEvent;
-      setEvents((current) => [created, ...current]);
-      setTitle("");
-      setDescription("");
-      setStartsAt("");
-      setLocation("");
-      setIsFormOpen(false);
-      setMessage("Evento registrado na agenda da escola.");
+      setEvents((current) =>
+        current.map((item) =>
+          item.id === schoolEvent.id ? { ...item, status: "published" } : item,
+        ),
+      );
+      setMessage("Evento publicado na agenda da escola.");
     } catch {
       setError("Não foi possível conectar à KlassApp. Verifique se a API está iniciada.");
     } finally {
-      setSubmitting(false);
+      setPublishingId("");
     }
   }
 
@@ -233,9 +332,12 @@ export function EventManagement({ initialEvents, classes, schoolName }: EventMan
           eyebrow="AGENDA DA COMUNIDADE"
           icon="▣"
           isBusy={submitting}
-          onClose={() => setIsFormOpen(false)}
-          title="Registre um evento"
-          titleId="create-event-title"
+          onClose={() => {
+            setIsFormOpen(false);
+            setEditingId(null);
+          }}
+          title={editingId ? "Editar evento" : "Registre um evento"}
+          titleId="event-form-title"
         >
           <form className="event-form" onSubmit={createEvent}>
             <label>
@@ -326,10 +428,41 @@ export function EventManagement({ initialEvents, classes, schoolName }: EventMan
               O evento ficará visível nesta área da administração. Ainda não há portal dos responsáveis nem envio de mensagens por WhatsApp.
             </p>
             <div className="dialog-form-actions">
-              <button className="class-submit event-submit" disabled={submitting} type="submit">
-                {submitting ? "Publicando..." : "Publicar evento"}
-              </button>
-              <button className="class-cancel-edit" disabled={submitting} onClick={() => setIsFormOpen(false)} type="button">
+              {editingId ? (
+                <button className="class-submit event-submit" disabled={submitting} type="submit">
+                  {submitting ? "Salvando..." : "Guardar cambios"}
+                </button>
+              ) : (
+                <>
+                  <button
+                    className="class-submit event-submit"
+                    disabled={submitting}
+                    name="status"
+                    type="submit"
+                    value="published"
+                  >
+                    {submittingStatus === "published" ? "Publicando..." : "Publicar evento"}
+                  </button>
+                  <button
+                    className="class-cancel-edit event-save-draft"
+                    disabled={submitting}
+                    name="status"
+                    type="submit"
+                    value="draft"
+                  >
+                    {submittingStatus === "draft" ? "Salvando..." : "Guardar evento"}
+                  </button>
+                </>
+              )}
+              <button
+                className="class-cancel-edit"
+                disabled={submitting}
+                onClick={() => {
+                  setIsFormOpen(false);
+                  setEditingId(null);
+                }}
+                type="button"
+              >
                 Fechar
               </button>
             </div>
@@ -350,6 +483,18 @@ export function EventManagement({ initialEvents, classes, schoolName }: EventMan
               onClick={() => {
                 setError("");
                 setMessage("");
+                setEditingId(null);
+                setTitle("");
+                setDescription("");
+                setStartsAt("");
+                setLocation("");
+                setAudienceType("class");
+                setClassId(classes[0]?.id ?? "");
+                setGradeKey(
+                  gradeAudiences[0]
+                    ? JSON.stringify([gradeAudiences[0].year, gradeAudiences[0].grade])
+                    : "",
+                );
                 setIsFormOpen(true);
               }}
               type="button"
@@ -391,30 +536,59 @@ export function EventManagement({ initialEvents, classes, schoolName }: EventMan
           </div>
         ) : (
           <ul className="event-list">
-            {events.map((schoolEvent) => (
+            {sortedEvents.map((schoolEvent) => (
               <li className={`event-list-item${schoolEvent.status === "cancelled" ? " event-cancelled" : ""}`} key={schoolEvent.id}>
                 <span className="event-date-icon" aria-hidden="true">✿</span>
                 <div className="event-list-copy">
                   <div className="event-title-row">
                     <strong>{schoolEvent.title}</strong>
-                    <span className={`event-status${schoolEvent.status === "cancelled" ? " cancelled" : ""}`}>
-                      {schoolEvent.status === "cancelled" ? "CANCELADO" : "PUBLICADO"}
+                    <span className={`event-status${schoolEvent.status === "cancelled" ? " cancelled" : schoolEvent.status === "draft" ? " draft" : ""}`}>
+                      {schoolEvent.status === "cancelled" ? "CANCELADO" : schoolEvent.status === "draft" ? "BORRADOR" : "PUBLICADO"}
                     </span>
                   </div>
                   <small>{formatEventDate(schoolEvent.startsAt, schoolEvent.timeZone)} · {schoolEvent.audienceLabel}</small>
                   {schoolEvent.location && <small>Local: {schoolEvent.location}</small>}
                   {schoolEvent.description && <p>{schoolEvent.description}</p>}
                 </div>
-                {schoolEvent.status === "published" && (
-                  <button
-                    className="event-cancel-button"
-                    disabled={Boolean(cancellingId)}
-                    onClick={() => cancelEvent(schoolEvent)}
-                    type="button"
-                  >
-                    {cancellingId === schoolEvent.id ? "Cancelando..." : "Cancelar"}
-                  </button>
-                )}
+                {schoolEvent.status === "draft" ? (
+                  <>
+                    <button
+                      className="event-edit-button"
+                      disabled={Boolean(publishingId) || Boolean(cancellingId)}
+                      onClick={() => editEvent(schoolEvent)}
+                      type="button"
+                    >
+                      Editar
+                    </button>
+                    <button
+                      className="event-publish-button"
+                      disabled={Boolean(publishingId) || Boolean(cancellingId)}
+                      onClick={() => publishEvent(schoolEvent)}
+                      type="button"
+                    >
+                      {publishingId === schoolEvent.id ? "Publicando..." : "Publicar"}
+                    </button>
+                  </>
+                ) : schoolEvent.status === "published" ? (
+                  <>
+                    <button
+                      className="event-edit-button"
+                      disabled={Boolean(cancellingId) || Boolean(publishingId)}
+                      onClick={() => editEvent(schoolEvent)}
+                      type="button"
+                    >
+                      Editar
+                    </button>
+                    <button
+                      className="event-cancel-button"
+                      disabled={Boolean(cancellingId) || Boolean(publishingId)}
+                      onClick={() => cancelEvent(schoolEvent)}
+                      type="button"
+                    >
+                      {cancellingId === schoolEvent.id ? "Cancelando..." : "Cancelar"}
+                    </button>
+                  </>
+                ) : null}
               </li>
             ))}
           </ul>

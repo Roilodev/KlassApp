@@ -10,7 +10,7 @@ const studentId = 'a0b80123-e89b-42d3-a456-426614174000';
 const validInput = {
   classId,
   title: 'Atividade do capítulo 3',
-  subject: 'Ciências',
+  subjectId: '223e4567-e89b-42d3-a456-426614174000',
   scheduledOn: '2026-11-15',
   maxPoints: 10,
 };
@@ -37,7 +37,8 @@ function assessmentRow() {
     year: 2026,
     academic_year_id: 'b0b80123-e89b-42d3-a456-426614174000',
     title: validInput.title,
-    subject: validInput.subject,
+    subject_id: validInput.subjectId,
+    subject: 'Ciências',
     scheduled_on: validInput.scheduledOn,
     max_points: '10.00',
   };
@@ -47,6 +48,7 @@ describe('AssessmentsService', () => {
   it.each([
     ['invalid class', { ...validInput, classId: 'not-a-uuid' }],
     ['blank title', { ...validInput, title: '   ' }],
+    ['invalid subject', { ...validInput, subjectId: 'not-a-uuid' }],
     ['invalid date', { ...validInput, scheduledOn: '2026-02-31' }],
     ['zero max points', { ...validInput, maxPoints: 0 }],
     ['too many decimals', { ...validInput, maxPoints: 1.234 }],
@@ -66,6 +68,9 @@ describe('AssessmentsService', () => {
           rows: [{ id: classId, year: 2026, grade: '4º ano', name: 'A' }],
           rowCount: 1,
         };
+      }
+      if (sql.includes('SELECT id FROM school_subjects')) {
+        return { rows: [{ id: validInput.subjectId }], rowCount: 1 };
       }
       if (sql.includes('INSERT INTO assessments')) {
         return { rows: [{ id: assessmentId }], rowCount: 1 };
@@ -103,6 +108,132 @@ describe('AssessmentsService', () => {
     expect(transaction).toHaveBeenCalledOnce();
   });
 
+  it('updates assessment details without changing its class and audits the change', async () => {
+    const updatedInput = {
+      title: 'Prova final',
+      subjectId: '323e4567-e89b-42d3-a456-426614174000',
+      scheduledOn: '2026-11-20',
+      maxPoints: 20,
+    };
+    const updatedRow = {
+      ...assessmentRow(),
+      title: updatedInput.title,
+      subject_id: updatedInput.subjectId,
+      scheduled_on: updatedInput.scheduledOn,
+      max_points: '20.00',
+    };
+    let assessmentSelectCount = 0;
+    const queryHandler = vi.fn(async (sql: string) => {
+      if (sql.includes('SELECT id FROM assessments')) {
+        return { rows: [{ id: assessmentId }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT assessments.id')) {
+        assessmentSelectCount += 1;
+        return {
+          rows: [assessmentSelectCount === 1 ? assessmentRow() : updatedRow],
+          rowCount: 1,
+        };
+      }
+      if (sql.includes('SELECT id FROM school_subjects')) {
+        return { rows: [{ id: updatedInput.subjectId }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT EXISTS')) {
+        return { rows: [{ exceeds_maximum: false }], rowCount: 1 };
+      }
+      if (sql.includes('UPDATE assessments')) {
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('INSERT INTO audit_logs')) {
+        return { rows: [], rowCount: 1 };
+      }
+      return { rows: [updatedRow], rowCount: 1 };
+    });
+    const { service, query, transaction } = makeService(queryHandler);
+
+    await expect(
+      service.update('school-id', 'user-id', 'teacher', assessmentId, updatedInput),
+    ).resolves.toMatchObject({
+      id: assessmentId,
+      classId,
+      title: updatedInput.title,
+      subjectId: updatedInput.subjectId,
+      scheduledOn: updatedInput.scheduledOn,
+      maxPoints: updatedInput.maxPoints,
+    });
+    expect(transaction).toHaveBeenCalledOnce();
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("'assessment.updated'"),
+      expect.anything(),
+    );
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE assessments'),
+      ['school-id', assessmentId, updatedInput.title, updatedInput.subjectId,
+        updatedInput.scheduledOn, updatedInput.maxPoints],
+    );
+  });
+
+  it('validates assessment changes before opening a transaction', async () => {
+    const { service, transaction } = makeService(async () => ({ rows: [], rowCount: 0 }));
+
+    await expect(
+      service.update('school-id', 'user-id', 'admin', assessmentId, {
+        title: 'Prova final',
+        subjectId: validInput.subjectId,
+        scheduledOn: validInput.scheduledOn,
+        maxPoints: 0,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects lowering the maximum below an already recorded score', async () => {
+    const queryHandler = vi.fn(async (sql: string) => {
+      if (sql.includes('SELECT id FROM assessments')) {
+        return { rows: [{ id: assessmentId }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT assessments.id')) {
+        return { rows: [assessmentRow()], rowCount: 1 };
+      }
+      if (sql.includes('SELECT id FROM school_subjects')) {
+        return { rows: [{ id: validInput.subjectId }], rowCount: 1 };
+      }
+      return { rows: [{ exceeds_maximum: true }], rowCount: 1 };
+    });
+    const { service, query } = makeService(queryHandler);
+
+    await expect(
+      service.update('school-id', 'user-id', 'admin', assessmentId, {
+        title: 'Atividade revisada',
+        subjectId: validInput.subjectId,
+        scheduledOn: validInput.scheduledOn,
+        maxPoints: 5,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(query).not.toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE assessments'),
+      expect.anything(),
+    );
+  });
+
+  it('rejects assessment updates for classes not assigned to a teacher', async () => {
+    const queryHandler = vi.fn(async (sql: string) => {
+      if (sql.includes('SELECT id FROM assessments')) {
+        return { rows: [{ id: assessmentId }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    });
+    const { service } = makeService(queryHandler);
+
+    await expect(
+      service.update('school-id', 'teacher-id', 'teacher', assessmentId, {
+        title: 'Atividade revisada',
+        subjectId: validInput.subjectId,
+        scheduledOn: validInput.scheduledOn,
+        maxPoints: 10,
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
   it('lists only active students in the assessment class', async () => {
     const queryHandler = vi.fn(async (sql: string) => {
       if (sql.includes('SELECT assessments.id')) {
@@ -133,6 +264,10 @@ describe('AssessmentsService', () => {
       ['school-id', assessmentId],
     );
     expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('recorded_results.assessment_id = assessments.id'),
+      ['school-id', assessmentId],
+    );
+    expect(query).toHaveBeenCalledWith(
       expect.stringContaining('teacher_class_assignments'),
       expect.arrayContaining(['teacher']),
     );
@@ -140,6 +275,9 @@ describe('AssessmentsService', () => {
 
   it('records a result only when it is within the assessment score range', async () => {
     const queryHandler = vi.fn(async (sql: string) => {
+      if (sql.includes('SELECT id FROM assessments')) {
+        return { rows: [{ id: assessmentId }], rowCount: 1 };
+      }
       if (sql.includes('SELECT assessments.id')) {
         return { rows: [assessmentRow()], rowCount: 1 };
       }
@@ -186,6 +324,9 @@ describe('AssessmentsService', () => {
 
   it('rejects scores above the maximum before writing a result', async () => {
     const queryHandler = vi.fn(async (sql: string) => {
+      if (sql.includes('SELECT id FROM assessments')) {
+        return { rows: [{ id: assessmentId }], rowCount: 1 };
+      }
       if (sql.includes('SELECT assessments.id')) {
         return { rows: [assessmentRow()], rowCount: 1 };
       }

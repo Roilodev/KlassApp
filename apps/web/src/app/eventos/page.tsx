@@ -64,13 +64,6 @@ async function EventsDashboard() {
           <span className="brand-mark" aria-hidden="true">k</span>
           <span>Klass<span className="brand-highlight">App</span></span>
         </Link>
-        <div className="school-switcher">
-          <span className="school-avatar" aria-hidden="true">✿</span>
-          <span className="school-copy">
-            <strong>{session.school.name}</strong>
-            <small>Escola piloto</small>
-          </span>
-        </div>
         <nav className="main-nav" aria-label="Navegação principal">
           <p className="nav-heading">MENU</p>
           <Link className="nav-item" href="/">
@@ -93,6 +86,10 @@ async function EventsDashboard() {
             <span className="nav-icon" aria-hidden="true">◷</span>
             <span>Horários</span>
           </Link>
+          <Link className="nav-item" href="/materias">
+            <span className="nav-icon" aria-hidden="true">▤</span>
+            <span>Matérias</span>
+          </Link>
           <Link className="nav-item active" href="/eventos">
             <span className="nav-icon" aria-hidden="true">▣</span>
             <span>Eventos</span>
@@ -105,28 +102,26 @@ async function EventsDashboard() {
             <span className="nav-icon" aria-hidden="true">♡</span>
             <span>Comportamento</span>
           </Link>
+          <Link className="nav-item" href="/configuracao">
+            <span className="nav-icon" aria-hidden="true">⚙</span>
+            <span>Configuração</span>
+          </Link>
         </nav>
-        <div className="sidebar-note">
-          <span className="note-sparkle" aria-hidden="true">✦</span>
-          <strong>Um bom dia começa junto</strong>
-          <p>Organize a rotina da escola com mais leveza.</p>
-        </div>
-        <div className="profile">
-          <span className="profile-avatar" aria-hidden="true">A</span>
-          <span className="profile-copy">
-            <strong>{session.user.displayName}</strong>
-            <small>Administração</small>
-          </span>
-          <LogoutButton />
-        </div>
       </aside>
 
       <main className="main-content">
         <header className="topbar">
           <div className="breadcrumb">
-            <Link href="/">Escola</Link> <span>/</span> <strong>Eventos</strong>
+            <Link href="/">{session.school.name}</Link> <span>/</span> <strong>Eventos</strong>
           </div>
-          <span className="today-label">ESCOLA PILOTO</span>
+          <div className="topbar-user">
+            <span className="profile-avatar" aria-hidden="true">{session.user.displayName.slice(0, 1).toUpperCase()}</span>
+            <span className="topbar-user-copy">
+              <strong>{session.user.displayName}</strong>
+              <small>{session.school.role === "admin" ? "Administração" : "Professor(a)"}</small>
+            </span>
+            <LogoutButton />
+          </div>
         </header>
 
         <section className="welcome-section classes-welcome">

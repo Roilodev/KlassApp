@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import Link from "next/link";
 import type { SchoolClass } from "../turmas/class-form";
+import type { SchoolSubject } from "../horarios/schedule-management";
 import { PersonProfile } from "../person-profile";
 import { PersonPhotoAvatar } from "../person-photo";
 
@@ -13,41 +14,74 @@ function normalizeSearch(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 }
 
+async function showRequestError(
+  response: Response,
+  setError: (message: string) => void,
+  fallback: string,
+) {
+  if (response.status === 401) {
+    setError("Sua sessão expirou. Entre novamente para continuar.");
+  } else if (response.status === 403) {
+    setError("Somente a administração pode alterar as matérias do professor.");
+  } else if (response.status === 429) {
+    setError("Muitas tentativas. Aguarde um momento e tente novamente.");
+  } else {
+    const result = await response.json().catch(() => null);
+    setError(typeof result?.message === "string" ? result.message : fallback);
+  }
+}
+
 interface Teacher {
   id: string;
   email: string;
   displayName: string;
   phone: string | null;
+  homeAddress: string;
   status: "active" | "inactive" | "pending";
+  leaveDate: string | null;
+  leaveReason: string | null;
   hasPhoto: boolean;
   classes: SchoolClass[];
+  subjectIds: string[];
   invitationExpiresAt: string | null;
 }
 
 interface TeacherManagementProps {
   initialTeachers: Teacher[];
   classes: SchoolClass[];
+  subjects: SchoolSubject[];
 }
 
 export function TeacherManagement({
   initialTeachers,
   classes,
+  subjects,
 }: TeacherManagementProps) {
   const [teachers, setTeachers] = useState(initialTeachers);
   const [selectedClasses, setSelectedClasses] = useState<string[]>([]);
+  const [selectedSubjectIds, setSelectedSubjectIds] = useState<string[]>([]);
+  const [subjectTeacher, setSubjectTeacher] = useState<Teacher | null>(null);
+  const [editingSubjectIds, setEditingSubjectIds] = useState<string[]>([]);
+  const [savingSubjects, setSavingSubjects] = useState(false);
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [phone, setPhone] = useState("");
+  const [homeAddress, setHomeAddress] = useState("");
   const [search, setSearch] = useState("");
   const [invitationUrl, setInvitationUrl] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [activationTeacher, setActivationTeacher] = useState<Teacher | null>(null);
+  const [activationPassword, setActivationPassword] = useState("");
+  const [activationError, setActivationError] = useState("");
+  const [activating, setActivating] = useState(false);
   const [profileTeacher, setProfileTeacher] = useState<{
     id: string;
     displayName: string;
     status: Teacher["status"];
+    subjectIds: string[];
   } | null>(null);
 
   const searchTerm = normalizeSearch(search.trim());
@@ -57,8 +91,12 @@ export function TeacherManagement({
       teacher.displayName,
       teacher.email,
       teacher.phone ?? "",
+      teacher.homeAddress,
       ...teacher.classes.map((schoolClass) =>
         `${schoolClass.grade} ${schoolClass.name} ${schoolClass.year}`,
+      ),
+      ...teacher.subjectIds.map((id) =>
+        subjects.find((subject) => subject.id === id)?.name ?? "",
       ),
       teacher.status,
     ].join(" "));
@@ -75,6 +113,16 @@ export function TeacherManagement({
     );
   }
 
+  function toggleSubject(
+    subjectId: string,
+    selected: string[],
+    update: (ids: string[]) => void,
+  ) {
+    update(selected.includes(subjectId)
+      ? selected.filter((id) => id !== subjectId)
+      : [...selected, subjectId]);
+  }
+
   async function inviteTeacher(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
@@ -87,7 +135,14 @@ export function TeacherManagement({
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, displayName, phone, classIds: selectedClasses }),
+        body: JSON.stringify({
+          email,
+          displayName,
+          phone,
+          homeAddress,
+          classIds: selectedClasses,
+          subjectIds: selectedSubjectIds,
+        }),
       });
 
       if (!response.ok) {
@@ -117,9 +172,13 @@ export function TeacherManagement({
         email: result.email,
         displayName: result.displayName,
         phone: result.phone,
+        homeAddress: result.homeAddress ?? homeAddress,
         status: result.status === "active" ? "active" : "pending",
+        leaveDate: null,
+        leaveReason: null,
         hasPhoto: existingTeacher?.hasPhoto ?? false,
         classes: classes.filter((schoolClass) => selectedClasses.includes(schoolClass.id)),
+        subjectIds: selectedSubjectIds,
         invitationExpiresAt: result.expiresAt ?? null,
       };
       setTeachers((current) => [
@@ -131,7 +190,9 @@ export function TeacherManagement({
       setEmail("");
       setDisplayName("");
       setPhone("");
+      setHomeAddress("");
       setSelectedClasses([]);
+      setSelectedSubjectIds([]);
       setInvitationUrl(result.invitationUrl ?? "");
       setMessage(
         result.status === "active"
@@ -145,12 +206,97 @@ export function TeacherManagement({
     }
   }
 
+  async function saveTeacherSubjects(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!subjectTeacher) return;
+    setError("");
+    setMessage("");
+    setSavingSubjects(true);
+    try {
+      const response = await fetch(`${apiUrl}/teachers/${subjectTeacher.id}/subjects`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subjectIds: editingSubjectIds }),
+      });
+      if (!response.ok) {
+        await showRequestError(response, setError, "Não foi possível atualizar as matérias.");
+        return;
+      }
+      setTeachers((current) => current.map((teacher) =>
+        teacher.id === subjectTeacher.id
+          ? { ...teacher, subjectIds: editingSubjectIds }
+          : teacher,
+      ));
+      setSubjectTeacher(null);
+      setMessage("Matérias do professor atualizadas.");
+    } catch {
+      setError("Não foi possível conectar à KlassApp. Verifique se a API está iniciada.");
+    } finally {
+      setSavingSubjects(false);
+    }
+  }
+
   async function copyInvitation() {
     try {
       await navigator.clipboard.writeText(invitationUrl);
       setMessage("Link copiado. Compartilhe-o diretamente com o professor.");
     } catch {
       setError("Não foi possível copiar. Selecione e copie o link manualmente.");
+    }
+  }
+
+  async function activatePendingTeacher(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!activationTeacher) return;
+    setActivationError("");
+    setActivating(true);
+    try {
+      const response = await fetch(
+        `${apiUrl}/teachers/invitations/${activationTeacher.id}/activate`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: activationPassword }),
+        },
+      );
+      if (!response.ok) {
+        const result = await response.json().catch(() => null);
+        throw new Error(
+          typeof result?.message === "string"
+            ? result.message
+            : "Não foi possível ativar o professor.",
+        );
+      }
+      const result = await response.json() as {
+        teacherId: string;
+        email: string;
+        displayName: string;
+      };
+      setTeachers((current) => current.map((teacher) =>
+        teacher.id === activationTeacher.id
+          ? {
+              ...teacher,
+              id: result.teacherId,
+              email: result.email,
+              displayName: result.displayName,
+              status: "active" as const,
+              invitationExpiresAt: null,
+            }
+          : teacher,
+      ).sort((a, b) => a.displayName.localeCompare(b.displayName)));
+      setMessage("Professor ativado. Compartilhe a senha com ele por um canal seguro.");
+      setActivationPassword("");
+      setActivationTeacher(null);
+    } catch (requestError) {
+      setActivationError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Não foi possível ativar o professor.",
+      );
+    } finally {
+      setActivating(false);
     }
   }
 
@@ -218,6 +364,16 @@ export function TeacherManagement({
                   value={phone}
                 />
               </label>
+              <label>
+                Endereço residencial
+                <input
+                  autoComplete="street-address"
+                  maxLength={300}
+                  onChange={(event) => setHomeAddress(event.target.value)}
+                  placeholder="Rua, número, bairro, cidade"
+                  value={homeAddress}
+                />
+              </label>
             </div>
 
             <fieldset className="class-picker">
@@ -234,6 +390,25 @@ export function TeacherManagement({
                     <small>{schoolClass.year}</small>
                   </label>
                 ))}
+              </div>
+            </fieldset>
+
+            <fieldset className="class-picker">
+              <legend>Matérias que leciona</legend>
+              <div className="class-picker-options">
+                {subjects.map((subject) => (
+                  <label className="class-option" key={subject.id}>
+                    <input
+                      checked={selectedSubjectIds.includes(subject.id)}
+                      onChange={() =>
+                        toggleSubject(subject.id, selectedSubjectIds, setSelectedSubjectIds)
+                      }
+                      type="checkbox"
+                    />
+                    <span>{subject.name}</span>
+                  </label>
+                ))}
+                {subjects.length === 0 && <small>Cadastre matérias antes de associá-las.</small>}
               </div>
             </fieldset>
 
@@ -272,6 +447,70 @@ export function TeacherManagement({
           </section>
         </div>
       )}
+      {activationTeacher && (
+        <div
+          className="profile-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !activating) {
+              setActivationTeacher(null);
+              setActivationPassword("");
+              setActivationError("");
+            }
+          }}
+        >
+          <section
+            aria-labelledby="activate-teacher-title"
+            aria-modal="true"
+            className="entry-form-dialog"
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && !activating) setActivationTeacher(null);
+            }}
+            role="dialog"
+            tabIndex={-1}
+          >
+            <div className="class-panel-heading">
+              <div className="setup-icon" aria-hidden="true">♙</div>
+              <div>
+                <p className="card-kicker">ATIVAÇÃO ADMINISTRATIVA</p>
+                <h2 id="activate-teacher-title">Ativar {activationTeacher.displayName}</h2>
+                <p>Defina a senha inicial para liberar o acesso à conta.</p>
+              </div>
+            </div>
+            <form className="teacher-form" onSubmit={activatePendingTeacher}>
+              <label className="teacher-activation-password">
+                Senha inicial (mínimo de 12 caracteres)
+                <input
+                  autoComplete="new-password"
+                  maxLength={128}
+                  minLength={12}
+                  onChange={(event) => setActivationPassword(event.target.value)}
+                  required
+                  type="password"
+                  value={activationPassword}
+                />
+              </label>
+              <p className="profile-edit-note">
+                A senha não será exibida novamente. Compartilhe-a com o professor por um canal seguro.
+              </p>
+              {activationError && (
+                <p className="form-message form-error" role="alert">{activationError}</p>
+              )}
+              <div className="dialog-form-actions teacher-submit">
+                <button className="class-cancel-edit" disabled={activating} onClick={() => {
+                  setActivationTeacher(null);
+                  setActivationPassword("");
+                  setActivationError("");
+                }} type="button">
+                  Cancelar
+                </button>
+                <button className="class-submit" disabled={activating} type="submit">
+                  {activating ? "Ativando..." : "Ativar professor"}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
 
       <section className="class-list-panel" aria-labelledby="teachers-title">
         <div className="section-heading class-list-heading">
@@ -287,6 +526,8 @@ export function TeacherManagement({
                 setError("");
                 setMessage("");
                 setInvitationUrl("");
+                setSelectedClasses([]);
+                setSelectedSubjectIds([]);
                 setIsFormOpen(true);
               }}
               type="button"
@@ -307,7 +548,7 @@ export function TeacherManagement({
           <span>Buscar professor</span>
           <input
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Nome, email, telefone ou turma"
+            placeholder="Nome, email, endereço, telefone ou turma"
             type="search"
             value={search}
           />
@@ -335,6 +576,7 @@ export function TeacherManagement({
                     id: teacher.id,
                     displayName: teacher.displayName,
                     status: teacher.status,
+                    subjectIds: teacher.subjectIds,
                   })}
                   type="button"
                 >
@@ -361,6 +603,12 @@ export function TeacherManagement({
                         </span>
                       ))}
                     </span>
+                    <span className="teacher-class-tags">
+                      {teacher.subjectIds.map((id) => {
+                        const subject = subjects.find((item) => item.id === id);
+                        return subject ? <span key={id}>{subject.name}</span> : null;
+                      })}
+                    </span>
                   </span>
                   <span className={`teacher-status ${teacher.status}`}>
                     {teacher.status === "active"
@@ -370,21 +618,122 @@ export function TeacherManagement({
                         : "CONVITE PENDENTE"}
                   </span>
                 </button>
+                {teacher.status === "pending" && (
+                  <button
+                    className="teacher-activate-button"
+                    onClick={() => {
+                      setActivationError("");
+                      setActivationPassword("");
+                      setActivationTeacher(teacher);
+                    }}
+                    type="button"
+                  >
+                    Ativar e definir senha
+                  </button>
+                )}
+                {teacher.status !== "pending" && (
+                  <button
+                    className="teacher-subjects-button"
+                    onClick={() => {
+                      setError("");
+                      setEditingSubjectIds(teacher.subjectIds);
+                      setSubjectTeacher(teacher);
+                    }}
+                    type="button"
+                  >
+                    Matérias ({teacher.subjectIds.length})
+                  </button>
+                )}
               </li>
             ))}
           </ul>
         )}
       </section>
+      {subjectTeacher && (
+        <div
+          className="profile-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !savingSubjects) {
+              setSubjectTeacher(null);
+            }
+          }}
+        >
+          <section
+            aria-labelledby="teacher-subjects-title"
+            aria-modal="true"
+            className="entry-form-dialog"
+            role="dialog"
+            tabIndex={-1}
+          >
+            <div className="class-panel-heading">
+              <div className="setup-icon" aria-hidden="true">▤</div>
+              <div>
+                <p className="card-kicker">VÍNCULO DE MATÉRIAS</p>
+                <h2 id="teacher-subjects-title">Matérias de {subjectTeacher.displayName}</h2>
+                <p>As matérias definem em quais aulas o professor poderá ser selecionado.</p>
+              </div>
+            </div>
+            <form className="teacher-form" onSubmit={saveTeacherSubjects}>
+              <fieldset className="class-picker">
+                <legend>Matérias que leciona</legend>
+                <div className="class-picker-options">
+                  {subjects.map((subject) => (
+                    <label className="class-option" key={subject.id}>
+                      <input
+                        checked={editingSubjectIds.includes(subject.id)}
+                        onChange={() =>
+                          toggleSubject(subject.id, editingSubjectIds, setEditingSubjectIds)
+                        }
+                        type="checkbox"
+                      />
+                      <span>{subject.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+              {error && <p className="form-message form-error" role="alert">{error}</p>}
+              <div className="dialog-form-actions teacher-submit">
+                <button
+                  className="class-cancel-edit"
+                  disabled={savingSubjects}
+                  onClick={() => setSubjectTeacher(null)}
+                  type="button"
+                >
+                  Cancelar
+                </button>
+                <button className="class-submit" disabled={savingSubjects} type="submit">
+                  {savingSubjects ? "Salvando..." : "Salvar matérias"}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
       {profileTeacher && (
         <PersonProfile
           canEditPhoto={profileTeacher.status === "active"}
           canEditProfile
           classes={classes}
           kind="teachers"
+          teacherSubjects={profileTeacher.subjectIds
+            .map((subjectId) => subjects.find((subject) => subject.id === subjectId)?.name)
+            .filter((name): name is string => name !== undefined)}
           onProfileUpdated={(updated) => {
             const displayName = updated.displayName;
             const email = updated.email;
             const updatedClasses = updated.classes;
+            if (updated.isActive !== undefined) {
+              setTeachers((current) => current.map((teacher) =>
+                teacher.id === updated.id
+                  ? {
+                      ...teacher,
+                      status: updated.isActive ? "active" : "inactive",
+                      leaveDate: updated.leaveDate ?? null,
+                      leaveReason: updated.leaveReason ?? null,
+                    }
+                  : teacher,
+              ));
+            }
             if (displayName && email && updatedClasses) {
               setTeachers((current) => current.map((teacher) =>
                 teacher.id === updated.id
@@ -393,6 +742,7 @@ export function TeacherManagement({
                       displayName,
                       email,
                       phone: updated.phone ?? teacher.phone,
+                      homeAddress: updated.homeAddress ?? teacher.homeAddress,
                       classes: updatedClasses,
                     }
                   : teacher,

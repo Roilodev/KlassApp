@@ -13,7 +13,14 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 export interface CreateAssessmentInput {
   classId: string;
   title: string;
-  subject: string;
+  subjectId: string;
+  scheduledOn: string;
+  maxPoints: number;
+}
+
+export interface UpdateAssessmentInput {
+  title: string;
+  subjectId: string;
   scheduledOn: string;
   maxPoints: number;
 }
@@ -36,6 +43,7 @@ export interface AssessmentRecord {
   classLabel: string;
   year: number;
   title: string;
+  subjectId: string;
   subject: string;
   scheduledOn: string;
   maxPoints: number;
@@ -54,6 +62,7 @@ interface AssessmentRow {
   class_label: string;
   year: number;
   title: string;
+  subject_id: string;
   subject: string;
   scheduled_on: string;
   max_points: string;
@@ -69,7 +78,8 @@ interface AssessmentQueryable {
 const ASSESSMENT_SELECT = `SELECT assessments.id, assessments.class_id,
                                   grades.name || ' · Turma ' || classes.name AS class_label,
                                   academic_years.year, assessments.title,
-                                  assessments.subject, assessments.scheduled_on::text AS scheduled_on,
+                                  assessments.subject_id, school_subjects.name AS subject,
+                                  assessments.scheduled_on::text AS scheduled_on,
                                   assessments.max_points::text AS max_points
                            FROM assessments
                            JOIN classes
@@ -80,7 +90,10 @@ const ASSESSMENT_SELECT = `SELECT assessments.id, assessments.class_id,
                             AND academic_years.id = assessments.academic_year_id
                            JOIN grades
                              ON grades.school_id = classes.school_id
-                            AND grades.id = classes.grade_id`;
+                              AND grades.id = classes.grade_id
+                             JOIN school_subjects
+                               ON school_subjects.school_id = assessments.school_id
+                              AND school_subjects.id = assessments.subject_id`;
 
 function mapAssessment(row: AssessmentRow): AssessmentRecord {
   return {
@@ -89,6 +102,7 @@ function mapAssessment(row: AssessmentRow): AssessmentRecord {
     classLabel: row.class_label,
     year: row.year,
     title: row.title,
+    subjectId: row.subject_id,
     subject: row.subject,
     scheduledOn: row.scheduled_on,
     maxPoints: Number(row.max_points),
@@ -106,6 +120,39 @@ function isValidDate(value: string): boolean {
     date.getUTCFullYear() >= 2000 &&
     date.getUTCFullYear() <= 2200
   );
+}
+
+function validateAssessmentDetails(input: UpdateAssessmentInput) {
+  if (
+    !input ||
+    typeof input !== 'object' ||
+    typeof input.title !== 'string' ||
+    typeof input.subjectId !== 'string' ||
+    typeof input.scheduledOn !== 'string' ||
+    typeof input.maxPoints !== 'number'
+  ) {
+    throw new BadRequestException('Informe os dados da avaliação.');
+  }
+  const title = input.title.trim();
+  const subjectId = input.subjectId.trim();
+  if (title.length < 1 || title.length > 160) {
+    throw new BadRequestException('O título deve ter entre 1 e 160 caracteres.');
+  }
+  if (!UUID_PATTERN.test(subjectId)) {
+    throw new BadRequestException('Selecione uma matéria válida.');
+  }
+  if (!isValidDate(input.scheduledOn)) {
+    throw new BadRequestException('Informe uma data válida para a avaliação.');
+  }
+  if (
+    !Number.isFinite(input.maxPoints) ||
+    input.maxPoints <= 0 ||
+    input.maxPoints > 10000 ||
+    Math.round(input.maxPoints * 100) !== input.maxPoints * 100
+  ) {
+    throw new BadRequestException('A pontuação máxima deve ser maior que zero e ter até duas casas decimais.');
+  }
+  return { title, subjectId };
 }
 
 @Injectable()
@@ -165,38 +212,12 @@ export class AssessmentsService {
     role: SchoolRole,
     input: CreateAssessmentInput,
   ): Promise<AssessmentRecord> {
-    if (
-      !input ||
-      typeof input !== 'object' ||
-      typeof input.classId !== 'string' ||
-      typeof input.title !== 'string' ||
-      typeof input.subject !== 'string' ||
-      typeof input.scheduledOn !== 'string' ||
-      typeof input.maxPoints !== 'number'
-    ) {
+    if (!input || typeof input !== 'object' || typeof input.classId !== 'string') {
       throw new BadRequestException('Informe os dados da avaliação.');
     }
-    const title = input.title.trim();
-    const subject = input.subject.trim();
+    const { title, subjectId } = validateAssessmentDetails(input);
     if (!UUID_PATTERN.test(input.classId)) {
       throw new BadRequestException('Selecione uma turma válida.');
-    }
-    if (title.length < 1 || title.length > 160) {
-      throw new BadRequestException('O título deve ter entre 1 e 160 caracteres.');
-    }
-    if (subject.length < 1 || subject.length > 80) {
-      throw new BadRequestException('A disciplina deve ter entre 1 e 80 caracteres.');
-    }
-    if (!isValidDate(input.scheduledOn)) {
-      throw new BadRequestException('Informe uma data válida para a avaliação.');
-    }
-    if (
-      !Number.isFinite(input.maxPoints) ||
-      input.maxPoints <= 0 ||
-      input.maxPoints > 10000 ||
-      Math.round(input.maxPoints * 100) !== input.maxPoints * 100
-    ) {
-      throw new BadRequestException('A pontuação máxima deve ser maior que zero e ter até duas casas decimais.');
     }
 
     return this.database.transaction(async (client) => {
@@ -204,9 +225,16 @@ export class AssessmentsService {
       if (!schoolClass) {
         throw new NotFoundException('A turma não foi encontrada ou não está atribuída a você.');
       }
+      const schoolSubject = await client.query(
+        'SELECT id FROM school_subjects WHERE school_id = $1 AND id = $2',
+        [schoolId, subjectId],
+      );
+      if (schoolSubject.rowCount !== 1) {
+        throw new NotFoundException('A matéria selecionada não foi encontrada.');
+      }
       const result = await client.query<{ id: string }>(
         `INSERT INTO assessments
-           (school_id, class_id, academic_year_id, title, subject, scheduled_on, max_points, created_by)
+           (school_id, class_id, academic_year_id, title, subject_id, scheduled_on, max_points, created_by)
          SELECT $1, classes.id, classes.academic_year_id, $4, $5, $6::date, $7, $2
          FROM classes
          WHERE classes.school_id = $1 AND classes.id = $3
@@ -216,7 +244,7 @@ export class AssessmentsService {
           createdBy,
           input.classId,
           title,
-          subject,
+          subjectId,
           input.scheduledOn,
           input.maxPoints,
         ],
@@ -235,13 +263,98 @@ export class AssessmentsService {
           JSON.stringify({
             classId: input.classId,
             title,
-            subject,
+            subjectId,
             scheduledOn: input.scheduledOn,
             maxPoints: input.maxPoints,
           }),
         ],
       );
       return this.getAssessment(client, schoolId, createdBy, role, assessmentId);
+    });
+  }
+
+  async update(
+    schoolId: string,
+    updatedBy: string,
+    role: SchoolRole,
+    assessmentId: string,
+    input: UpdateAssessmentInput,
+  ): Promise<AssessmentRecord> {
+    if (!UUID_PATTERN.test(assessmentId)) {
+      throw new BadRequestException('Avaliação inválida.');
+    }
+    const { title, subjectId } = validateAssessmentDetails(input);
+
+    return this.database.transaction(async (client) => {
+      const locked = await client.query(
+        `SELECT id FROM assessments
+         WHERE school_id = $1 AND id = $2
+         FOR UPDATE`,
+        [schoolId, assessmentId],
+      );
+      if (locked.rowCount !== 1) {
+        throw new NotFoundException('A avaliação não foi encontrada.');
+      }
+
+      const assessment = await this.getAssessment(
+        client,
+        schoolId,
+        updatedBy,
+        role,
+        assessmentId,
+      );
+      const subject = await client.query(
+        'SELECT id FROM school_subjects WHERE school_id = $1 AND id = $2',
+        [schoolId, subjectId],
+      );
+      if (subject.rowCount !== 1) {
+        throw new NotFoundException('A matéria selecionada não foi encontrada.');
+      }
+
+      const resultLimit = await client.query<{ exceeds_maximum: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1 FROM assessment_results
+           WHERE school_id = $1 AND assessment_id = $2 AND score > $3
+         ) AS exceeds_maximum`,
+        [schoolId, assessmentId, input.maxPoints],
+      );
+      if (resultLimit.rows[0]?.exceeds_maximum) {
+        throw new BadRequestException(
+          'A pontuação máxima não pode ser menor que um resultado já registrado.',
+        );
+      }
+
+      await client.query(
+        `UPDATE assessments
+         SET title = $3, subject_id = $4, scheduled_on = $5::date,
+             max_points = $6
+         WHERE school_id = $1 AND id = $2`,
+        [schoolId, assessmentId, title, subjectId, input.scheduledOn, input.maxPoints],
+      );
+      await client.query(
+        `INSERT INTO audit_logs (school_id, actor_id, action, entity_type, entity_id, details)
+         VALUES ($1, $2, 'assessment.updated', 'assessment', $3, $4::jsonb)`,
+        [
+          schoolId,
+          updatedBy,
+          assessmentId,
+          JSON.stringify({
+            previous: {
+              title: assessment.title,
+              subjectId: assessment.subjectId,
+              scheduledOn: assessment.scheduledOn,
+              maxPoints: assessment.maxPoints,
+            },
+            updated: {
+              title,
+              subjectId,
+              scheduledOn: input.scheduledOn,
+              maxPoints: input.maxPoints,
+            },
+          }),
+        ],
+      );
+      return this.getAssessment(client, schoolId, updatedBy, role, assessmentId);
     });
   }
 
@@ -279,6 +392,12 @@ export class AssessmentsService {
         AND (
           student_enrollments.status IN ('active', 'completed')
           OR student_enrollments.ended_at >= assessments.scheduled_on
+          OR EXISTS (
+            SELECT 1 FROM assessment_results AS recorded_results
+            WHERE recorded_results.school_id = assessments.school_id
+              AND recorded_results.assessment_id = assessments.id
+              AND recorded_results.student_id = student_enrollments.student_id
+          )
         )
        JOIN students
          ON students.school_id = student_enrollments.school_id
@@ -288,6 +407,11 @@ export class AssessmentsService {
         AND assessment_results.assessment_id = assessments.id
         AND assessment_results.student_id = students.id
        WHERE assessments.school_id = $1 AND assessments.id = $2
+         AND (
+           students.is_active = true
+           OR assessments.scheduled_on <= students.leave_date
+           OR assessment_results.id IS NOT NULL
+         )
        ORDER BY students.full_name, students.id`,
       [schoolId, assessment.id],
     );
@@ -326,6 +450,15 @@ export class AssessmentsService {
     }
 
     return this.database.transaction(async (client) => {
+      const locked = await client.query(
+        `SELECT id FROM assessments
+         WHERE school_id = $1 AND id = $2
+         FOR UPDATE`,
+        [schoolId, assessmentId],
+      );
+      if (locked.rowCount !== 1) {
+        throw new NotFoundException('A avaliação não foi encontrada.');
+      }
       const assessment = await this.getAssessment(
         client,
         schoolId,
@@ -342,6 +475,12 @@ export class AssessmentsService {
          FROM student_enrollments
          WHERE school_id = $1 AND student_id = $2
            AND class_id = $3 AND academic_year_id = $4 AND status = 'active'
+           AND EXISTS (
+             SELECT 1 FROM students
+             WHERE students.school_id = student_enrollments.school_id
+               AND students.id = student_enrollments.student_id
+               AND students.is_active = true
+           )
          FOR UPDATE`,
         [schoolId, input.studentId, assessment.classId, assessment.yearId],
       );

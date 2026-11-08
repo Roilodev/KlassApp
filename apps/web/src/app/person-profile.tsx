@@ -10,6 +10,10 @@ interface StudentProfileData {
   student: {
     id: string;
     fullName: string;
+    homeAddress: string | null;
+    isActive: boolean;
+    leaveDate: string | null;
+    leaveReason: string | null;
     schoolName: string;
     createdAt: string;
     photoAuthorizationDate: string | null;
@@ -77,9 +81,12 @@ interface TeacherProfileData {
     displayName: string;
     email: string;
     phone: string | null;
+    homeAddress: string | null;
     schoolName: string;
     createdAt: string;
     isActive: boolean;
+    leaveDate: string | null;
+    leaveReason: string | null;
   };
   classes: Array<{ id: string; year: number; grade: string; name: string }>;
   assessments: Array<{
@@ -93,16 +100,6 @@ interface TeacherProfileData {
     resultsRecorded: number;
   }>;
   studentsCount: number;
-  events: Array<{
-    id: string;
-    title: string;
-    description: string;
-    startsAt: string;
-    location: string;
-    status: string;
-    audienceType: string;
-    audience: string;
-  }>;
   schedules: Array<{
     year: number;
     grade: string;
@@ -123,12 +120,17 @@ interface PersonProfileProps {
   canEditPhoto: boolean;
   canEditProfile: boolean;
   classes?: SchoolClass[];
+  teacherSubjects?: string[];
   onProfileUpdated?: (updated: {
     id: string;
     fullName?: string;
     displayName?: string;
     email?: string;
     phone?: string;
+    homeAddress?: string;
+    isActive?: boolean;
+    leaveDate?: string | null;
+    leaveReason?: string | null;
     responsibles?: StudentProfileData["responsibles"];
     classes?: SchoolClass[];
   }) => void;
@@ -156,6 +158,12 @@ function formatDateTime(value: string) {
   });
 }
 
+function localDateInputValue() {
+  const date = new Date();
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 10);
+}
+
 export function PersonProfile({
   kind,
   personId,
@@ -163,6 +171,7 @@ export function PersonProfile({
   canEditPhoto,
   canEditProfile,
   classes = [],
+  teacherSubjects = [],
   onProfileUpdated,
   onClose,
 }: PersonProfileProps) {
@@ -171,16 +180,22 @@ export function PersonProfile({
   const [error, setError] = useState("");
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [leaveFormOpen, setLeaveFormOpen] = useState(false);
+  const [leaveFormDate, setLeaveFormDate] = useState(localDateInputValue);
+  const [leaveFormReason, setLeaveFormReason] = useState("");
+  const [leaveActionError, setLeaveActionError] = useState("");
   const [saveError, setSaveError] = useState("");
   const [saveSuccess, setSaveSuccess] = useState("");
   const [responsibleSaveError, setResponsibleSaveError] = useState<{ index: number; message: string } | null>(null);
   const [responsibleSavingIndex, setResponsibleSavingIndex] = useState<number | null>(null);
   const [studentName, setStudentName] = useState("");
+  const [studentHomeAddress, setStudentHomeAddress] = useState("");
   const [responsibles, setResponsibles] = useState<ResponsibleDraft[]>([]);
   const [collapsedResponsibleIds, setCollapsedResponsibleIds] = useState<string[]>([]);
   const [teacherName, setTeacherName] = useState("");
   const [teacherEmail, setTeacherEmail] = useState("");
   const [teacherPhone, setTeacherPhone] = useState("");
+  const [teacherHomeAddress, setTeacherHomeAddress] = useState("");
   const [teacherClassIds, setTeacherClassIds] = useState<string[]>([]);
   const newResponsibleNameRef = useRef<HTMLInputElement>(null);
   const [photoActionsTarget, setPhotoActionsTarget] = useState<HTMLDivElement | null>(null);
@@ -224,16 +239,19 @@ export function PersonProfile({
   const studentProfile = isStudent ? profile as StudentProfileData | null : null;
   const teacherProfile = isStudent ? null : profile as TeacherProfileData | null;
   const profileName = studentProfile?.student.fullName ?? teacherProfile?.teacher.displayName ?? personName;
+  const personIsActive = studentProfile?.student.isActive ?? teacherProfile?.teacher.isActive ?? true;
 
   function beginEditing() {
     if (studentProfile) {
       setStudentName(studentProfile.student.fullName);
+      setStudentHomeAddress(studentProfile.student.homeAddress ?? "");
       setResponsibles(studentProfile.responsibles.map((responsible) => ({ ...responsible })));
       setCollapsedResponsibleIds([]);
     } else if (teacherProfile) {
       setTeacherName(teacherProfile.teacher.displayName);
       setTeacherEmail(teacherProfile.teacher.email);
       setTeacherPhone(teacherProfile.teacher.phone ?? "");
+      setTeacherHomeAddress(teacherProfile.teacher.homeAddress ?? "");
       setTeacherClassIds(teacherProfile.classes.map((schoolClass) => schoolClass.id));
     }
     setSaveError("");
@@ -280,11 +298,16 @@ export function PersonProfile({
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(isStudent
-          ? { fullName: studentName, responsibles: responsiblesToSave }
+          ? {
+              fullName: studentName,
+              homeAddress: studentHomeAddress,
+              responsibles: responsiblesToSave,
+            }
           : {
               displayName: teacherName,
               email: teacherEmail,
               phone: teacherPhone,
+              homeAddress: teacherHomeAddress,
               classIds: teacherClassIds,
             }),
       });
@@ -318,6 +341,7 @@ export function PersonProfile({
         displayName?: string;
         email?: string;
         phone?: string;
+        homeAddress?: string;
         responsibles?: StudentProfileData["responsibles"];
         classes?: SchoolClass[];
       };
@@ -330,10 +354,15 @@ export function PersonProfile({
         return;
       }
       setProfile((current) => {
-        if (isStudent && current && "student" in current && updated.fullName && updated.responsibles) {
+        if (isStudent && current && "student" in current && updated.fullName &&
+            updated.homeAddress !== undefined && updated.responsibles) {
           return {
             ...current,
-            student: { ...current.student, fullName: updated.fullName },
+            student: {
+              ...current.student,
+              fullName: updated.fullName,
+              homeAddress: updated.homeAddress,
+            },
             responsibles: updated.responsibles,
           };
         }
@@ -346,6 +375,7 @@ export function PersonProfile({
               displayName: updated.displayName,
               email: updated.email,
               phone: updated.phone,
+              homeAddress: updated.homeAddress ?? current.teacher.homeAddress,
             },
             classes: updated.classes,
           };
@@ -385,7 +415,78 @@ export function PersonProfile({
     }
   }
 
+  async function changeLeave(reactivate = false) {
+    setSaving(true);
+    setLeaveActionError("");
+    try {
+      const action = reactivate ? "reactivate" : "leave";
+      const response = await fetch(`${apiUrl}/${kind}/${personId}/${action}`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        ...(reactivate
+          ? {}
+          : { body: JSON.stringify({ date: leaveFormDate, reason: leaveFormReason }) }),
+      });
+      if (!response.ok) {
+        const result = await response.json().catch(() => null);
+        throw new Error(
+          typeof result?.message === "string"
+            ? result.message
+            : `Não foi possível ${reactivate ? "reativar" : "registrar a baixa"} (HTTP ${response.status}).`,
+        );
+      }
+      const result = await response.json() as {
+        isActive: boolean;
+        leaveDate: string | null;
+        leaveReason: string | null;
+      };
+      setProfile((current) => {
+        if (current && "student" in current) {
+          return {
+            ...current,
+            student: {
+              ...current.student,
+              isActive: result.isActive,
+              leaveDate: result.leaveDate,
+              leaveReason: result.leaveReason,
+            },
+          };
+        }
+        if (current && "teacher" in current) {
+          return {
+            ...current,
+            teacher: {
+              ...current.teacher,
+              isActive: result.isActive,
+              leaveDate: result.leaveDate,
+              leaveReason: result.leaveReason,
+            },
+          };
+        }
+        return current;
+      });
+      onProfileUpdated?.({
+        id: personId,
+        isActive: result.isActive,
+        leaveDate: result.leaveDate,
+        leaveReason: result.leaveReason,
+      });
+      setLeaveFormOpen(false);
+      setLeaveFormReason("");
+    } catch (actionError) {
+      setLeaveActionError(
+        actionError instanceof Error
+          ? actionError.message
+          : "Não foi possível atualizar a situação.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
+    <>
     <div className="profile-backdrop" onMouseDown={(event) => {
       if (event.target === event.currentTarget && !saving) onClose();
     }}>
@@ -427,6 +528,9 @@ export function PersonProfile({
                   <p className="card-kicker">ESTUDANTE</p>
                   <h2>{studentProfile.student.fullName}</h2>
                   <p>Cadastro em {formatDateTime(studentProfile.student.createdAt)}</p>
+                  <p className={studentProfile.student.isActive ? "profile-active-status" : "profile-inactive-status"}>
+                    {studentProfile.student.isActive ? "Matrícula ativa" : "Aluno de baixa"}
+                  </p>
                 </div>
               </div>
 
@@ -450,6 +554,34 @@ export function PersonProfile({
                   <p>Não há matrícula ativa no momento.</p>
                 )}
               </section>
+
+              <section className="student-ficha-section">
+                <h2><span aria-hidden="true">⌂</span> Endereço residencial</h2>
+                <p>
+                  {studentProfile.student.homeAddress ??
+                    (studentProfile.responsiblesRestricted
+                      ? "Disponível apenas para a administração."
+                      : "Não informado.")}
+                </p>
+              </section>
+
+              {!studentProfile.student.isActive && (
+                <section className="student-ficha-section">
+                  <h2><span aria-hidden="true">!</span> Dados da baixa</h2>
+                  <ul>
+                    <li>
+                      <strong>Data</strong>
+                      <span>{studentProfile.student.leaveDate
+                        ? formatDate(studentProfile.student.leaveDate)
+                        : "Não informada"}</span>
+                    </li>
+                    <li>
+                      <strong>Motivo</strong>
+                      <span>{studentProfile.student.leaveReason ?? "Não informado"}</span>
+                    </li>
+                  </ul>
+                </section>
+              )}
 
               <section className="student-ficha-section student-ficha-family">
                 <h2><span aria-hidden="true">♡</span> Dados familiares</h2>
@@ -497,12 +629,24 @@ export function PersonProfile({
                     personName={teacherProfile.teacher.displayName}
                   />
                 </div>
-                <div className="student-ficha-name">
-                  <p className="card-kicker">PROFESSOR(A)</p>
-                  <h2>{teacherProfile.teacher.displayName}</h2>
-                  <p className={teacherProfile.teacher.isActive ? "profile-active-status" : "profile-inactive-status"}>
-                    {teacherProfile.teacher.isActive ? "Perfil ativo" : "Perfil inativo"}
-                  </p>
+                <div className="teacher-ficha-identity-details">
+                  <div className="student-ficha-name">
+                    <p className="card-kicker">PROFESSOR(A)</p>
+                    <h2>{teacherProfile.teacher.displayName}</h2>
+                    <p className={teacherProfile.teacher.isActive ? "profile-active-status" : "profile-inactive-status"}>
+                      {teacherProfile.teacher.isActive ? "Perfil ativo" : "Perfil inativo"}
+                    </p>
+                  </div>
+                  <div className="teacher-ficha-subjects">
+                    <p className="card-kicker">MATÉRIAS</p>
+                    {teacherSubjects.length === 0 ? (
+                      <p className="teacher-ficha-no-subjects">Nenhuma matéria atribuída.</p>
+                    ) : (
+                      <ul>
+                        {teacherSubjects.map((subject) => <li key={subject}>{subject}</li>)}
+                      </ul>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -518,9 +662,27 @@ export function PersonProfile({
                     <span>{teacherProfile.teacher.phone ?? "Não informado"}</span>
                   </li>
                   <li>
+                    <strong>Endereço residencial</strong>
+                    <span>{teacherProfile.teacher.homeAddress || "Não informado"}</span>
+                  </li>
+                  <li>
                     <strong>Cadastro</strong>
                     <span>{formatDateTime(teacherProfile.teacher.createdAt)}</span>
                   </li>
+                  {!teacherProfile.teacher.isActive && (
+                    <>
+                      <li>
+                        <strong>Data da baixa</strong>
+                        <span>{teacherProfile.teacher.leaveDate
+                          ? formatDate(teacherProfile.teacher.leaveDate)
+                          : "Não informada"}</span>
+                      </li>
+                      <li>
+                        <strong>Motivo da baixa</strong>
+                        <span>{teacherProfile.teacher.leaveReason ?? "Não informado"}</span>
+                      </li>
+                    </>
+                  )}
                 </ul>
               </section>
 
@@ -573,21 +735,6 @@ export function PersonProfile({
                 )}
               </section>
 
-              <section className="student-ficha-section">
-                <h2><span aria-hidden="true">◇</span> Eventos escolares</h2>
-                {teacherProfile.events.length === 0 ? <p>Nenhum evento criado.</p> : (
-                  <ul>
-                    {teacherProfile.events.map((schoolEvent) => (
-                      <li key={schoolEvent.id}>
-                        <strong>{schoolEvent.title} · {schoolEvent.status === "published" ? "Publicado" : "Cancelado"}</strong>
-                        <span>{schoolEvent.audience} · {formatDateTime(schoolEvent.startsAt)}</span>
-                        {schoolEvent.location && <span>{schoolEvent.location}</span>}
-                        {schoolEvent.description && <span>{schoolEvent.description}</span>}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
             </div>
             <footer className="student-ficha-footer">
               <span>Uma comunidade que aprende e cresce junta</span>
@@ -656,6 +803,10 @@ export function PersonProfile({
           </div>
         )}
 
+        {leaveActionError && !leaveFormOpen && (
+          <p className="form-message form-error" role="alert">{leaveActionError}</p>
+        )}
+
         {saveSuccess && <p className="form-message form-success" role="status">{saveSuccess}</p>}
         {loading ? (
           <p className="profile-loading">Carregando os dados...</p>
@@ -688,6 +839,19 @@ export function PersonProfile({
                     }}
                     required
                     value={studentName}
+                  />
+                </label>
+                <label>
+                  Endereço residencial
+                  <input
+                    autoComplete="street-address"
+                    maxLength={300}
+                    onChange={(event) => {
+                      setStudentHomeAddress(event.target.value);
+                      setSaveError("");
+                    }}
+                    placeholder="Rua, número, bairro, cidade"
+                    value={studentHomeAddress}
                   />
                 </label>
                 <fieldset className="profile-responsible-editor">
@@ -850,6 +1014,16 @@ export function PersonProfile({
                     value={teacherPhone}
                   />
                 </label>
+                <label>
+                  Endereço residencial
+                  <input
+                    autoComplete="street-address"
+                    maxLength={300}
+                    onChange={(event) => setTeacherHomeAddress(event.target.value)}
+                    placeholder="Rua, número, bairro, cidade"
+                    value={teacherHomeAddress}
+                  />
+                </label>
                 <p className="profile-edit-note">
                   Nome e email pertencem à conta global do professor e podem refletir-se em outras escolas. O telefone fica associado somente a esta escola para possíveis notificações futuras.
                 </p>
@@ -901,12 +1075,31 @@ export function PersonProfile({
           <div className="profile-dialog-actions">
             {(studentProfile || teacherProfile) && !loading && !error && (
               <>
-                <button className="profile-print-button" onClick={() => window.print()} type="button">
+                <button className="profile-cancel-button" onClick={() => window.print()} type="button">
                   Imprimir ficha
                 </button>
                 {canEditProfile && (
                   <button className="profile-cancel-button" onClick={beginEditing} type="button">
                     Editar dados
+                  </button>
+                )}
+                {canEditProfile && (
+                  <button
+                    className={personIsActive ? "profile-leave-button" : "profile-cancel-button"}
+                    disabled={saving}
+                    onClick={() => {
+                      if (personIsActive) {
+                        setLeaveFormDate(localDateInputValue());
+                        setLeaveFormReason("");
+                        setLeaveActionError("");
+                        setLeaveFormOpen(true);
+                      } else {
+                        void changeLeave(true);
+                      }
+                    }}
+                    type="button"
+                  >
+                    {saving ? "Salvando..." : personIsActive ? "Dar de baixa" : "Reativar"}
                   </button>
                 )}
                 {canEditPhoto && (
@@ -921,5 +1114,79 @@ export function PersonProfile({
         )}
       </section>
     </div>
+    {leaveFormOpen && canEditProfile && (
+      <div
+        className="profile-backdrop profile-leave-backdrop"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !saving) {
+            setLeaveFormOpen(false);
+            setLeaveActionError("");
+          }
+        }}
+      >
+        <section
+          aria-labelledby="profile-leave-title"
+          aria-modal="true"
+          className="entry-form-dialog profile-leave-dialog"
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && !saving) {
+              setLeaveFormOpen(false);
+              setLeaveActionError("");
+            }
+          }}
+          role="dialog"
+          tabIndex={-1}
+        >
+          <h2 id="profile-leave-title">
+            Registrar baixa de {isStudent ? "aluno" : "professor"}
+          </h2>
+          <form
+            className="profile-leave-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void changeLeave();
+            }}
+          >
+            <label>
+              Data da baixa
+              <input
+                onChange={(event) => setLeaveFormDate(event.target.value)}
+                required
+                type="date"
+                value={leaveFormDate}
+              />
+            </label>
+            <label>
+              Motivo
+              <textarea
+                maxLength={500}
+                onChange={(event) => setLeaveFormReason(event.target.value)}
+                required
+                rows={3}
+                value={leaveFormReason}
+              />
+            </label>
+            {leaveActionError && <p className="form-message form-error" role="alert">{leaveActionError}</p>}
+            <div className="profile-edit-actions">
+              <button
+                className="profile-cancel-button"
+                disabled={saving}
+                onClick={() => {
+                  setLeaveFormOpen(false);
+                  setLeaveActionError("");
+                }}
+                type="button"
+              >
+                Cancelar
+              </button>
+              <button className="class-submit" disabled={saving} type="submit">
+                {saving ? "Salvando..." : "Confirmar baixa"}
+              </button>
+            </div>
+          </form>
+        </section>
+      </div>
+    )}
+    </>
   );
 }

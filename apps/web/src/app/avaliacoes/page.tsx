@@ -5,6 +5,7 @@ import { Suspense } from "react";
 import { LogoutButton } from "../logout-button";
 import { AssessmentManagement } from "./assessment-management";
 import type { AssessmentClass, AssessmentRecord } from "./assessment-management";
+import type { SchoolSubject } from "../horarios/schedule-management";
 import { SectionIllustration } from "../section-illustration";
 
 const apiUrl = process.env.API_INTERNAL_URL ?? "http://localhost:4000";
@@ -35,22 +36,25 @@ async function AssessmentsDashboard() {
   }
   const session = await sessionResponse.json();
 
-  const [classResponse, assessmentResponse] = await Promise.all([
+  const [classResponse, assessmentResponse, subjectResponse] = await Promise.all([
     fetch(`${apiUrl}/assessments/classes`, { headers, cache: "no-store" }),
     fetch(`${apiUrl}/assessments`, { headers, cache: "no-store" }),
+    fetch(`${apiUrl}/subjects`, { headers, cache: "no-store" }),
   ]);
   if (
     classResponse.status === 401 || classResponse.status === 403 ||
-    assessmentResponse.status === 401 || assessmentResponse.status === 403
+    assessmentResponse.status === 401 || assessmentResponse.status === 403 ||
+    subjectResponse.status === 401 || subjectResponse.status === 403
   ) {
     redirect("/login");
   }
-  if (!classResponse.ok || !assessmentResponse.ok) {
-    throw new Error("Não foi possível carregar as turmas e as avaliações.");
+  if (!classResponse.ok || !assessmentResponse.ok || !subjectResponse.ok) {
+    throw new Error("Não foi possível carregar as turmas, matérias e avaliações.");
   }
-  const [classes, assessments] = await Promise.all([
+  const [classes, assessments, subjects] = await Promise.all([
     classResponse.json() as Promise<AssessmentClass[]>,
     assessmentResponse.json() as Promise<AssessmentRecord[]>,
+    subjectResponse.json() as Promise<SchoolSubject[]>,
   ]);
 
   return (
@@ -60,13 +64,6 @@ async function AssessmentsDashboard() {
           <span className="brand-mark" aria-hidden="true">k</span>
           <span>Klass<span className="brand-highlight">App</span></span>
         </Link>
-        <div className="school-switcher">
-          <span className="school-avatar" aria-hidden="true">✿</span>
-          <span className="school-copy">
-            <strong>{session.school.name}</strong>
-            <small>Escola piloto</small>
-          </span>
-        </div>
         <nav className="main-nav" aria-label="Navegação principal">
           <p className="nav-heading">MENU</p>
           <Link className="nav-item" href="/">
@@ -91,6 +88,10 @@ async function AssessmentsDashboard() {
                 <span className="nav-icon" aria-hidden="true">◷</span>
                 <span>Horários</span>
               </Link>
+              <Link className="nav-item" href="/materias">
+                <span className="nav-icon" aria-hidden="true">▤</span>
+                <span>Matérias</span>
+              </Link>
               <Link className="nav-item" href="/eventos">
                 <span className="nav-icon" aria-hidden="true">▣</span>
                 <span>Eventos</span>
@@ -105,30 +106,26 @@ async function AssessmentsDashboard() {
             <span className="nav-icon" aria-hidden="true">♡</span>
             <span>Comportamento</span>
           </Link>
+          <Link className="nav-item" href="/configuracao">
+            <span className="nav-icon" aria-hidden="true">⚙</span>
+            <span>Configuração</span>
+          </Link>
         </nav>
-        <div className="sidebar-note">
-          <span className="note-sparkle" aria-hidden="true">✦</span>
-          <strong>Um bom dia começa junto</strong>
-          <p>Organize a rotina da escola com mais leveza.</p>
-        </div>
-        <div className="profile">
-          <span className="profile-avatar" aria-hidden="true">
-            {session.user.displayName.slice(0, 1).toUpperCase()}
-          </span>
-          <span className="profile-copy">
-            <strong>{session.user.displayName}</strong>
-            <small>{session.school.role === "admin" ? "Administração" : "Professor(a)"}</small>
-          </span>
-          <LogoutButton />
-        </div>
       </aside>
 
       <main className="main-content">
         <header className="topbar">
           <div className="breadcrumb">
-            <Link href="/">Escola</Link> <span>/</span> <strong>Avaliações</strong>
+            <Link href="/">{session.school.name}</Link> <span>/</span> <strong>Avaliações</strong>
           </div>
-          <span className="today-label">ESCOLA PILOTO</span>
+          <div className="topbar-user">
+            <span className="profile-avatar" aria-hidden="true">{session.user.displayName.slice(0, 1).toUpperCase()}</span>
+            <span className="topbar-user-copy">
+              <strong>{session.user.displayName}</strong>
+              <small>{session.school.role === "admin" ? "Administração" : "Professor(a)"}</small>
+            </span>
+            <LogoutButton />
+          </div>
         </header>
 
         <section className="welcome-section classes-welcome">
@@ -145,6 +142,7 @@ async function AssessmentsDashboard() {
         <AssessmentManagement
           initialAssessments={assessments}
           classes={classes}
+          subjects={subjects}
         />
 
         <p className="privacy-note assessment-notice">

@@ -24,11 +24,81 @@ function makeService(
 }
 
 describe('ProfilesService', () => {
+  it('records and reverses a student leave with an audit trail', async () => {
+    const { service, query } = makeService(async (sql) => {
+      if (sql.includes('UPDATE students')) {
+        return { rows: [{ id: 'student-id' }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 1 };
+    });
+
+    await expect(service.leaveStudent('school-id', 'admin-id', 'student-id', {
+      date: '2026-10-31',
+      reason: 'Mudança de cidade',
+    })).resolves.toEqual({
+      id: 'student-id',
+      isActive: false,
+      leaveDate: '2026-10-31',
+      leaveReason: 'Mudança de cidade',
+    });
+    await expect(
+      service.reactivateStudent('school-id', 'admin-id', 'student-id'),
+    ).resolves.toEqual({
+      id: 'student-id',
+      isActive: true,
+      leaveDate: null,
+      leaveReason: null,
+    });
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('SET is_active = false, leave_date = $3::date, leave_reason = $4'),
+      ['school-id', 'student-id', '2026-10-31', 'Mudança de cidade'],
+    );
+    expect(query.mock.calls.some(([sql]) => sql.includes("'student.left'"))).toBe(true);
+    expect(query.mock.calls.some(([sql]) => sql.includes("'student.reactivated'"))).toBe(true);
+  });
+
+  it('rejects invalid leave dates and blank reasons before touching the database', async () => {
+    const { service, query, transaction } = makeService(async () => ({
+      rows: [],
+      rowCount: 0,
+    }));
+
+    await expect(service.leaveStudent('school-id', 'admin-id', 'student-id', {
+      date: '2026-02-31',
+      reason: 'Motivo',
+    })).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.leaveTeacher('school-id', 'admin-id', 'teacher-id', {
+      date: '2026-10-31',
+      reason: '   ',
+    })).rejects.toBeInstanceOf(BadRequestException);
+    expect(query).not.toHaveBeenCalled();
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('records a teacher leave and preserves the membership for reactivation', async () => {
+    const { service, query } = makeService(async (sql) => {
+      if (sql.includes('UPDATE school_memberships')) {
+        return { rows: [{ user_id: 'teacher-id' }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 1 };
+    });
+
+    await expect(service.leaveTeacher('school-id', 'admin-id', 'teacher-id', {
+      date: '2026-10-31',
+      reason: 'Encerramento do vínculo',
+    })).resolves.toMatchObject({ isActive: false, leaveDate: '2026-10-31' });
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("role = 'teacher' AND is_active = true"),
+      ['school-id', 'teacher-id', '2026-10-31', 'Encerramento do vínculo'],
+    );
+    expect(query.mock.calls.some(([sql]) => sql.includes("'teacher.left'"))).toBe(true);
+  });
+
   it('updates a student name and responsible contact and audits without recording phone data', async () => {
     const responsibleId = 'c0a80123-e89b-42d3-a456-426614174001';
     const { service, query, transaction } = makeService(async (sql) => {
-      if (sql.includes('SELECT full_name FROM students')) {
-        return { rows: [{ full_name: 'Nome antigo' }], rowCount: 1 };
+      if (sql.includes('SELECT full_name, home_address FROM students')) {
+        return { rows: [{ full_name: 'Nome antigo', home_address: null }], rowCount: 1 };
       }
       if (sql.includes('SELECT responsible_contacts.id')) {
         return {
@@ -45,6 +115,7 @@ describe('ProfilesService', () => {
       'student-id',
       {
         fullName: 'Nome atualizado',
+        homeAddress: 'Rua A, 123',
         responsibles: [{
           id: responsibleId,
           fullName: 'Responsável',
@@ -56,6 +127,7 @@ describe('ProfilesService', () => {
     )).resolves.toEqual({
       id: 'student-id',
       fullName: 'Nome atualizado',
+      homeAddress: 'Rua A, 123',
       responsibles: [{
         id: responsibleId,
         fullName: 'Responsável',
@@ -65,6 +137,10 @@ describe('ProfilesService', () => {
       }],
     });
     expect(transaction).toHaveBeenCalledOnce();
+    expect(query).toHaveBeenCalledWith(
+      'UPDATE students SET full_name = $3, home_address = $4 WHERE school_id = $1 AND id = $2',
+      ['school-id', 'student-id', 'Nome atualizado', 'Rua A, 123'],
+    );
     const authorizationCall = query.mock.calls.find(([sql]) =>
       sql.includes('SET relationship = $4'),
     );
@@ -85,8 +161,8 @@ describe('ProfilesService', () => {
   it('adds a responsible when updating a student profile', async () => {
     const newResponsibleId = 'c0a80123-e89b-42d3-a456-426614174005';
     const { service, query } = makeService(async (sql) => {
-      if (sql.includes('SELECT full_name FROM students')) {
-        return { rows: [{ full_name: 'Aluno' }], rowCount: 1 };
+      if (sql.includes('SELECT full_name, home_address FROM students')) {
+        return { rows: [{ full_name: 'Aluno', home_address: 'Rua já cadastrada, 50' }], rowCount: 1 };
       }
       if (sql.includes('SELECT responsible_contacts.id')) {
         return { rows: [], rowCount: 0 };
@@ -113,6 +189,7 @@ describe('ProfilesService', () => {
     )).resolves.toEqual({
       id: 'student-id',
       fullName: 'Aluno',
+      homeAddress: 'Rua já cadastrada, 50',
       responsibles: [{
         id: newResponsibleId,
         fullName: 'Nova responsável',
@@ -127,6 +204,10 @@ describe('ProfilesService', () => {
     );
     expect(lockedResponsiblesQuery?.[0]).not.toMatch(/count\s*\(\s*\*\s*\)\s*over/i);
     expect(query.mock.calls.some(([sql]) => sql.includes('INSERT INTO student_responsibles'))).toBe(true);
+    expect(query).toHaveBeenCalledWith(
+      'UPDATE students SET full_name = $3, home_address = $4 WHERE school_id = $1 AND id = $2',
+      ['school-id', 'student-id', 'Aluno', 'Rua já cadastrada, 50'],
+    );
     const auditCall = query.mock.calls.find(([sql]) => sql.includes('INSERT INTO audit_logs'));
     expect(auditCall?.[1]?.[3]).toContain('"added":1');
     const responsibleLinkCall = query.mock.calls.find(([sql]) =>
@@ -137,8 +218,8 @@ describe('ProfilesService', () => {
 
   it('rejects a responsible from another student and invalid phone data', async () => {
     const { service, transaction } = makeService(async (sql) => {
-      if (sql.includes('SELECT full_name FROM students')) {
-        return { rows: [{ full_name: 'Aluno' }], rowCount: 1 };
+      if (sql.includes('SELECT full_name, home_address FROM students')) {
+        return { rows: [{ full_name: 'Aluno', home_address: null }], rowCount: 1 };
       }
       return { rows: [], rowCount: 0 };
     });
@@ -209,6 +290,7 @@ describe('ProfilesService', () => {
         displayName: 'Nome novo',
         email: 'NEW@example.test',
         phone: '(11) 99999-8888',
+        homeAddress: 'Rua A, 123',
         classIds: [classId],
       },
     )).resolves.toEqual({
@@ -216,6 +298,7 @@ describe('ProfilesService', () => {
       displayName: 'Nome novo',
       email: 'new@example.test',
       phone: '+5511999998888',
+      homeAddress: 'Rua A, 123',
       classes: [{ id: classId, year: 2026, grade: '4º ano', name: 'A' }],
     });
     expect(transaction).toHaveBeenCalledOnce();
@@ -224,8 +307,8 @@ describe('ProfilesService', () => {
       [teacherId, 'Nome novo', 'new@example.test'],
     );
     expect(query).toHaveBeenCalledWith(
-      expect.stringContaining('SET phone_e164 = $3'),
-      ['school-id', teacherId, '+5511999998888'],
+      expect.stringContaining('SET phone_e164 = $3, home_address = $4'),
+      ['school-id', teacherId, '+5511999998888', 'Rua A, 123'],
     );
     expect(query.mock.calls.some(([sql]) => sql.includes('INSERT INTO audit_logs'))).toBe(true);
   });

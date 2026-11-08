@@ -8,16 +8,21 @@ import type { CreateScheduleInput } from './schedules.service.js';
 describe('SchedulesService', () => {
   const validInput = {
     classId: '123e4567-e89b-42d3-a456-426614174000',
+    subjectId: '223e4567-e89b-42d3-a456-426614174000',
     dayOfWeek: 1,
     startsAt: '08:00',
     endsAt: '08:50',
-    subject: 'Matemática',
   };
 
   function makeService(
     queryHandler: (sql: string) => Promise<{ rows: Record<string, unknown>[]; rowCount: number }>,
   ) {
-    const query = vi.fn(queryHandler);
+    const query = vi.fn(async (sql: string) => {
+      const result = await queryHandler(sql);
+      return sql.includes('FROM school_recesses') && result.rows[0]?.id
+        ? { rows: [], rowCount: 0 }
+        : result;
+    });
     const transaction = vi.fn(
       (work: (client: PoolClient) => Promise<unknown>) =>
         work({ query } as unknown as PoolClient),
@@ -32,7 +37,7 @@ describe('SchedulesService', () => {
     ['invalid weekday', { ...validInput, dayOfWeek: 8 }],
     ['invalid clock value', { ...validInput, startsAt: '25:00' }],
     ['end before start', { ...validInput, endsAt: '07:59' }],
-    ['blank subject', { ...validInput, subject: '   ' }],
+    ['invalid subject', { ...validInput, subjectId: 'not-a-uuid' }],
     ['invalid teacher identifier', { ...validInput, teacherId: 'not-a-uuid' }],
   ])('rejects %s before touching the database', async (_case, input) => {
     const { service, transaction } = makeService(async () => ({ rows: [], rowCount: 0 }));
@@ -51,6 +56,9 @@ describe('SchedulesService', () => {
       if (sql.includes('SELECT id FROM classes')) {
         return { rows: [{ id: validInput.classId }], rowCount: 1 };
       }
+      if (sql.includes('SELECT id FROM school_subjects')) {
+        return { rows: [{ id: validInput.subjectId }], rowCount: 1 };
+      }
       if (sql.includes('SELECT bool_or')) {
         return {
           rows: [{ class_conflict: false, teacher_conflict: false }],
@@ -67,12 +75,13 @@ describe('SchedulesService', () => {
         rows: [{
           id: scheduleId,
           class_id: validInput.classId,
+          subject_id: validInput.subjectId,
           class_label: '4º ano · Turma A',
           year: 2026,
           day_of_week: 1,
           starts_at: '08:00:00',
           ends_at: '08:50:00',
-          subject: validInput.subject,
+          subject: 'Matemática',
           teacher_id: null,
           teacher_name: null,
         }],
@@ -84,6 +93,7 @@ describe('SchedulesService', () => {
     await expect(service.create('school-id', 'user-id', validInput)).resolves.toEqual({
       id: scheduleId,
       classId: validInput.classId,
+      subjectId: validInput.subjectId,
       classLabel: '4º ano · Turma A',
       year: 2026,
       dayOfWeek: 1,
@@ -101,6 +111,120 @@ describe('SchedulesService', () => {
     expect(query).toHaveBeenCalledWith(
       expect.stringContaining("'schedule.created'"),
       expect.anything(),
+    );
+  });
+
+  it('requires an assigned subject for the selected teacher', async () => {
+    const teacherId = '323e4567-e89b-42d3-a456-426614174000';
+    const queryHandler = vi.fn(async (sql: string) => {
+      if (sql.includes('pg_advisory_xact_lock')) {
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('SELECT id FROM classes')) {
+        return { rows: [{ id: validInput.classId }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT id FROM school_subjects')) {
+        return { rows: [{ id: validInput.subjectId }], rowCount: 1 };
+      }
+      if (sql.includes('teacher_subject_assignments')) {
+        return { rows: [], rowCount: 0 };
+      }
+      return { rows: [], rowCount: 1 };
+    });
+
+    const { service, query } = makeService(queryHandler);
+
+    await expect(service.create('school-id', 'user-id', {
+      ...validInput,
+      teacherId,
+    })).rejects.toBeInstanceOf(BadRequestException);
+    expect(query).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO class_schedules'),
+      expect.anything(),
+    );
+  });
+
+  it('rejects a weekday class schedule during the school recess', async () => {
+    const queryHandler = vi.fn(async (sql: string) => {
+      if (sql.includes('pg_advisory_xact_lock')) {
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('SELECT id FROM classes')) {
+        return { rows: [{ id: validInput.classId }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT id FROM school_subjects')) {
+        return { rows: [{ id: validInput.subjectId }], rowCount: 1 };
+      }
+      if (sql.includes('FROM school_recesses')) {
+        return {
+          rows: [{ starts_at: '10:00:00', ends_at: '10:20:00' }],
+          rowCount: 1,
+        };
+      }
+      return { rows: [], rowCount: 0 };
+    });
+    const { service, query } = makeService(queryHandler);
+    const recessSchedule = { ...validInput, startsAt: '10:10', endsAt: '10:50' };
+
+    await expect(
+      service.create('school-id', 'user-id', recessSchedule),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(query).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO class_schedules'),
+      expect.anything(),
+    );
+  });
+
+  it('creates a schedule when the teacher is assigned to its subject and class', async () => {
+    const teacherId = '323e4567-e89b-42d3-a456-426614174000';
+    const queryHandler = vi.fn(async (sql: string) => {
+      if (sql.includes('pg_advisory_xact_lock')) {
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('SELECT id FROM classes')) {
+        return { rows: [{ id: validInput.classId }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT id FROM school_subjects')) {
+        return { rows: [{ id: validInput.subjectId }], rowCount: 1 };
+      }
+      if (sql.includes('teacher_subject_assignments')) {
+        return { rows: [{ '?column?': 1 }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT bool_or')) {
+        return {
+          rows: [{ class_conflict: false, teacher_conflict: false }],
+          rowCount: 1,
+        };
+      }
+      if (sql.includes('INSERT INTO class_schedules')) {
+        return { rows: [{ id: 'c0a80123-e89b-42d3-a456-426614174000' }], rowCount: 1 };
+      }
+      return {
+        rows: [{
+          id: 'c0a80123-e89b-42d3-a456-426614174000',
+          class_id: validInput.classId,
+          subject_id: validInput.subjectId,
+          class_label: '4º ano · Turma A',
+          year: 2026,
+          day_of_week: 1,
+          starts_at: '08:00:00',
+          ends_at: '08:50:00',
+          subject: 'Matemática',
+          teacher_id: teacherId,
+          teacher_name: 'Professora',
+        }],
+        rowCount: 1,
+      };
+    });
+    const { service, query } = makeService(queryHandler);
+
+    await expect(service.create('school-id', 'user-id', {
+      ...validInput,
+      teacherId,
+    })).resolves.toMatchObject({ teacherId, teacherName: 'Professora' });
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('teacher_subject_assignments.subject_id = $4'),
+      ['school-id', validInput.classId, teacherId, validInput.subjectId],
     );
   });
 
@@ -139,6 +263,7 @@ describe('SchedulesService', () => {
           rows: [{
             id: scheduleId,
             class_id: validInput.classId,
+            subject_id: validInput.subjectId,
             class_label: '4º ano · Turma A',
             year: 2026,
             day_of_week: 1,
@@ -154,6 +279,9 @@ describe('SchedulesService', () => {
       if (sql.includes('SELECT id FROM classes')) {
         return { rows: [{ id: validInput.classId }], rowCount: 1 };
       }
+      if (sql.includes('SELECT id FROM school_subjects')) {
+        return { rows: [{ id: validInput.subjectId }], rowCount: 1 };
+      }
       if (sql.includes('SELECT bool_or')) {
         return {
           rows: [{ class_conflict: false, teacher_conflict: false }],
@@ -167,6 +295,7 @@ describe('SchedulesService', () => {
         rows: [{
           id: scheduleId,
           class_id: validInput.classId,
+          subject_id: validInput.subjectId,
           class_label: '4º ano · Turma A',
           year: 2026,
           day_of_week: 2,
@@ -187,11 +316,11 @@ describe('SchedulesService', () => {
         dayOfWeek: 2,
         startsAt: '09:00',
         endsAt: '09:50',
-        subject: 'Ciências',
       }),
     ).resolves.toEqual({
       id: scheduleId,
       classId: validInput.classId,
+      subjectId: validInput.subjectId,
       classLabel: '4º ano · Turma A',
       year: 2026,
       dayOfWeek: 2,
@@ -227,7 +356,7 @@ describe('SchedulesService', () => {
       if (sql.includes('pg_advisory_xact_lock')) {
         return { rows: [], rowCount: 1 };
       }
-      if (sql.includes('SELECT class_id, day_of_week')) {
+      if (sql.includes('SELECT class_schedules.class_id, class_schedules.day_of_week')) {
         return {
           rows: [{ class_id: validInput.classId, day_of_week: 1, subject: 'Matemática' }],
           rowCount: 1,

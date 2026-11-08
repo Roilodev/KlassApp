@@ -127,9 +127,13 @@ export class BehaviorService {
          ))
          AND EXISTS (
            SELECT 1 FROM student_enrollments
+           JOIN students
+             ON students.school_id = student_enrollments.school_id
+            AND students.id = student_enrollments.student_id
            WHERE student_enrollments.school_id = classes.school_id
              AND student_enrollments.class_id = classes.id
              AND student_enrollments.status = 'active'
+             AND students.is_active = true
          )
        ORDER BY academic_years.year DESC, grades.name, classes.name`,
       [schoolId, userId, role],
@@ -158,6 +162,7 @@ export class BehaviorService {
          ON students.school_id = student_enrollments.school_id
         AND students.id = student_enrollments.student_id
        WHERE classes.school_id = $1 AND classes.id = $2
+         AND students.is_active = true
          AND ($4::text = 'admin' OR EXISTS (
            SELECT 1 FROM teacher_class_assignments
            WHERE teacher_class_assignments.school_id = classes.school_id
@@ -208,6 +213,7 @@ export class BehaviorService {
         AND academic_years.id = classes.academic_year_id
        WHERE student_enrollments.school_id = $1
          AND student_enrollments.status = 'active'
+         AND students.is_active = true
          AND (
            students.full_name ILIKE '%' || $2 || '%'
            OR grades.name ILIKE '%' || $2 || '%'
@@ -321,6 +327,12 @@ export class BehaviorService {
            AND student_enrollments.id = $2
            AND student_enrollments.status = 'active'
            AND student_enrollments.started_at <= $3::date
+           AND EXISTS (
+             SELECT 1 FROM students
+             WHERE students.school_id = student_enrollments.school_id
+               AND students.id = student_enrollments.student_id
+               AND students.is_active = true
+           )
            AND ($5::text = 'admin' OR EXISTS (
              SELECT 1 FROM teacher_class_assignments
              WHERE teacher_class_assignments.school_id = student_enrollments.school_id

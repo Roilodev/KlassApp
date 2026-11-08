@@ -4,6 +4,8 @@ import {
   Controller,
   Get,
   HttpCode,
+  Patch,
+  Param,
   Post,
   Query,
   Req,
@@ -42,6 +44,50 @@ export class TeachersController {
       request.user.schoolId,
       request.user.id,
       body as TeacherInvitationInput,
+    );
+  }
+
+  @Patch('teachers/:id/subjects')
+  @UseGuards(RolesGuard)
+  @SchoolRoles('admin')
+  updateSubjects(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') teacherId: string,
+    @Body() body: unknown,
+  ) {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      throw new BadRequestException('Selecione as matérias do professor.');
+    }
+    return this.teachers.updateSubjects(
+      request.user.schoolId,
+      request.user.id,
+      teacherId,
+      body as { subjectIds: string[] },
+    );
+  }
+
+  @Post('teachers/invitations/:id/activate')
+  @UseGuards(RolesGuard)
+  @SchoolRoles('admin')
+  activateInvitation(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    if (
+      !body ||
+      typeof body !== 'object' ||
+      Array.isArray(body) ||
+      !('password' in body) ||
+      typeof body.password !== 'string'
+    ) {
+      throw new BadRequestException('Informe uma senha de pelo menos 12 caracteres.');
+    }
+    return this.teachers.activateInvitation(
+      request.user.schoolId,
+      request.user.id,
+      id,
+      body.password,
     );
   }
 

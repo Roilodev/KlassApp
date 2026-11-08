@@ -106,6 +106,27 @@ try {
       'INSERT INTO school_memberships (school_id, user_id, role) VALUES ($1, $2, $3)',
       [school.rows[0].id, user.rows[0].id, 'admin'],
     );
+    await client.query(
+      `INSERT INTO school_subjects (school_id, name, created_by)
+       SELECT $1, subjects.name, $2
+       FROM unnest($3::text[]) AS subjects(name)
+       ON CONFLICT (school_id, lower(name)) DO NOTHING`,
+      [
+        school.rows[0].id,
+        user.rows[0].id,
+        [
+          'Língua Portuguesa',
+          'Arte',
+          'Educação Física',
+          'Matemática',
+          'Ciências',
+          'Geografia',
+          'História',
+          'Língua Inglesa',
+          'Ensino Religioso',
+        ],
+      ],
+    );
     await client.query('COMMIT');
     console.log(`Escola configurada. Acesse com ${email}.`);
   } catch (error) {

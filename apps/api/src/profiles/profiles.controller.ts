@@ -6,6 +6,7 @@ import {
   Get,
   Param,
   Patch,
+  Post,
   Put,
   Req,
   Res,
@@ -17,6 +18,7 @@ import { SchoolRoles } from '../auth/roles.decorator.js';
 import { RolesGuard } from '../auth/roles.guard.js';
 import { ProfilesService } from './profiles.service.js';
 import type {
+  LeaveInput,
   UpdateStudentProfileInput,
   UpdateTeacherProfileInput,
 } from './profiles.service.js';
@@ -55,6 +57,34 @@ export class ProfilesController {
       request.user.id,
       id,
       body as UpdateStudentProfileInput,
+    );
+  }
+
+  @Post('students/:id/leave')
+  @SchoolRoles('admin')
+  leaveStudent(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      throw new BadRequestException('Informe a data e o motivo da baixa.');
+    }
+    return this.profiles.leaveStudent(
+      request.user.schoolId,
+      request.user.id,
+      id,
+      body as LeaveInput,
+    );
+  }
+
+  @Post('students/:id/reactivate')
+  @SchoolRoles('admin')
+  reactivateStudent(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
+    return this.profiles.reactivateStudent(
+      request.user.schoolId,
+      request.user.id,
+      id,
     );
   }
 
@@ -140,6 +170,34 @@ export class ProfilesController {
       request.user.id,
       id,
       body as UpdateTeacherProfileInput,
+    );
+  }
+
+  @Post('teachers/:id/leave')
+  @SchoolRoles('admin')
+  leaveTeacher(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      throw new BadRequestException('Informe a data e o motivo da baixa.');
+    }
+    return this.profiles.leaveTeacher(
+      request.user.schoolId,
+      request.user.id,
+      id,
+      body as LeaveInput,
+    );
+  }
+
+  @Post('teachers/:id/reactivate')
+  @SchoolRoles('admin')
+  reactivateTeacher(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
+    return this.profiles.reactivateTeacher(
+      request.user.schoolId,
+      request.user.id,
+      id,
     );
   }
 

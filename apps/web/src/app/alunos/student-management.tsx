@@ -9,6 +9,10 @@ import { PersonPhotoAvatar } from "../person-photo";
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const studentsPerPage = 25;
+const studentCollator = new Intl.Collator("pt-BR", {
+  numeric: true,
+  sensitivity: "base",
+});
 
 function normalizeSearch(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
@@ -25,10 +29,14 @@ interface Responsible {
 interface Student {
   id: string;
   fullName: string;
+  homeAddress: string;
   hasPhoto: boolean;
-  academicYear: number;
-  grade: string;
-  className: string;
+  isActive: boolean;
+  leaveDate: string | null;
+  leaveReason: string | null;
+  academicYear: number | null;
+  grade: string | null;
+  className: string | null;
   responsibles: Responsible[];
 }
 
@@ -55,6 +63,7 @@ export function StudentManagement({
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedClassId, setSelectedClassId] = useState("");
   const [fullName, setFullName] = useState("");
+  const [homeAddress, setHomeAddress] = useState("");
   const [responsibles, setResponsibles] = useState([emptyResponsible()]);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -67,9 +76,10 @@ export function StudentManagement({
   const filteredStudents = students.filter((student) => {
     const text = normalizeSearch([
       student.fullName,
-      student.grade,
-      student.className,
-      String(student.academicYear),
+      student.homeAddress,
+      student.grade ?? "",
+      student.className ?? "",
+      String(student.academicYear ?? ""),
       ...student.responsibles.flatMap((responsible) => [
         responsible.fullName,
         responsible.relationship,
@@ -81,9 +91,51 @@ export function StudentManagement({
     return text.includes(searchTerm) ||
       (phoneSearch.length > 0 && phoneDigits.includes(phoneSearch));
   });
-  const totalPages = Math.ceil(filteredStudents.length / studentsPerPage);
+  const sortedStudents = [...filteredStudents].sort((left, right) =>
+    studentCollator.compare(left.grade ?? "", right.grade ?? "") ||
+    studentCollator.compare(left.className ?? "", right.className ?? "") ||
+    (right.academicYear ?? 0) - (left.academicYear ?? 0) ||
+    studentCollator.compare(left.fullName, right.fullName),
+  );
+  const totalPages = Math.ceil(sortedStudents.length / studentsPerPage);
   const pageStart = (currentPage - 1) * studentsPerPage;
-  const pageStudents = filteredStudents.slice(pageStart, pageStart + studentsPerPage);
+  const pageStudents = sortedStudents.slice(pageStart, pageStart + studentsPerPage);
+  const studentNumbers = new Map<string, number>();
+  const groupNumbers = new Map<string, number>();
+  for (const student of sortedStudents) {
+    const key = `${student.grade ?? ""}\u0000${student.className ?? ""}\u0000${student.academicYear ?? ""}`;
+    const number = (groupNumbers.get(key) ?? 0) + 1;
+    groupNumbers.set(key, number);
+    studentNumbers.set(student.id, number);
+  }
+  const studentGroups = pageStudents.reduce<Array<{
+    key: string;
+    label: string;
+    students: Student[];
+  }>>((groups, student) => {
+    const key = `${student.grade ?? ""}\u0000${student.className ?? ""}\u0000${student.academicYear ?? ""}`;
+    const currentGroup = groups[groups.length - 1];
+    if (currentGroup?.key === key) {
+      currentGroup.students.push(student);
+    } else {
+      groups.push({
+        key,
+        label: student.grade && student.className && student.academicYear
+          ? `${student.grade} · Turma ${student.className} · ${student.academicYear}`
+          : "Sem matrícula",
+        students: [student],
+      });
+    }
+    return groups;
+  }, []);
+  const visiblePages: Array<number | "ellipsis-start" | "ellipsis-end"> =
+    totalPages <= 7
+      ? Array.from({ length: totalPages }, (_, index) => index + 1)
+      : currentPage <= 4
+        ? [1, 2, 3, 4, 5, "ellipsis-end", totalPages]
+        : currentPage >= totalPages - 3
+          ? [1, "ellipsis-start", totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages]
+          : [1, "ellipsis-start", currentPage - 1, currentPage, currentPage + 1, "ellipsis-end", totalPages];
 
   function updateResponsible(
     index: number,
@@ -133,6 +185,7 @@ export function StudentManagement({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           fullName,
+          homeAddress,
           academicYear: schoolClass.year,
           classId: schoolClass.id,
           responsibles,
@@ -164,8 +217,10 @@ export function StudentManagement({
         ),
       );
       setFullName("");
+      setHomeAddress("");
       setSelectedClassId("");
       setResponsibles([emptyResponsible()]);
+      setCurrentPage(1);
       setSuccess("Aluno cadastrado e matriculado com sucesso.");
       setIsFormOpen(false);
     } catch {
@@ -229,6 +284,16 @@ export function StudentManagement({
                     </option>
                   ))}
                 </select>
+              </label>
+              <label>
+                Endereço residencial
+                <input
+                  autoComplete="street-address"
+                  maxLength={300}
+                  onChange={(event) => setHomeAddress(event.target.value)}
+                  placeholder="Rua, número, bairro, cidade"
+                  value={homeAddress}
+                />
               </label>
             </div>
 
@@ -375,7 +440,7 @@ export function StudentManagement({
                 setSearch(event.target.value);
                 setCurrentPage(1);
               }}
-              placeholder="Nome, turma, responsável ou telefone"
+              placeholder="Nome, endereço, turma, responsável ou telefone"
               type="search"
               value={search}
             />
@@ -402,72 +467,98 @@ export function StudentManagement({
           </div>
         ) : (
           <>
-            <div className="student-table-scroll" tabIndex={0} aria-label="Tabela de alunos; use a rolagem horizontal para ver todas as colunas">
+            <div className="student-table-scroll" tabIndex={0} aria-label="Lista de alunos; use a rolagem horizontal para ver todas as colunas">
               <table className="student-table">
                 <thead>
                   <tr>
+                    <th scope="col">N.º</th>
                     <th scope="col">Aluno</th>
-                    <th scope="col">Turma</th>
                     <th scope="col">Responsável</th>
-                    <th scope="col">Situação</th>
                   </tr>
                 </thead>
-                <tbody>
-                  {pageStudents.map((student) => (
-                    <tr key={student.id}>
-                      <td>
-                        <div className="student-table-person">
-                          <PersonPhotoAvatar
-                            hasPhoto={student.hasPhoto}
-                            kind="students"
-                            personId={student.id}
-                            personName={student.fullName}
-                          />
-                          <button
-                            className="student-name-button"
-                            onClick={() => setProfileStudent({ id: student.id, fullName: student.fullName })}
-                            type="button"
-                          >
-                            {student.fullName}
-                          </button>
-                        </div>
-                      </td>
-                      <td>
-                        <span className="student-table-class">
-                          {student.grade} · Turma {student.className}
-                        </span>
-                        <small className="student-table-year">{student.academicYear}</small>
-                      </td>
-                      <td>
-                        {student.responsibles[0] ? (
-                          <span className="student-table-contact">
-                            <span>{student.responsibles[0].fullName}</span>
-                            <small>{student.responsibles[0].phone}</small>
-                            {student.responsibles.length > 1 && (
-                              <small>+ {student.responsibles.length - 1} responsáveis</small>
-                            )}
-                          </span>
-                        ) : (
-                          <span className="student-table-muted">Não informado</span>
-                        )}
-                      </td>
-                      <td><span className="student-enrollment-status">Matrícula ativa</span></td>
+                {studentGroups.map((group) => (
+                  <tbody key={group.key}>
+                    <tr className="student-table-group">
+                      <th colSpan={3} scope="rowgroup">{group.label}</th>
                     </tr>
-                  ))}
-                </tbody>
+                    {group.students.map((student) => (
+                      <tr key={student.id}>
+                        <td>
+                          <span className="student-table-number">
+                            {studentNumbers.get(student.id)}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="student-table-person">
+                            <PersonPhotoAvatar
+                              hasPhoto={student.hasPhoto}
+                              kind="students"
+                              personId={student.id}
+                              personName={student.fullName}
+                            />
+                            <button
+                              className="student-name-button"
+                              onClick={() => setProfileStudent({ id: student.id, fullName: student.fullName })}
+                              type="button"
+                            >
+                              {student.fullName}
+                            </button>
+                            {!student.isActive && (
+                              <span className="student-leave-badge">BAIXA</span>
+                            )}
+                          </div>
+                        </td>
+                        <td>
+                          {student.responsibles[0] ? (
+                            <span className="student-table-contact">
+                              <span>{student.responsibles[0].fullName} · {student.responsibles[0].phone}</span>
+                              {student.responsibles.length > 1 && (
+                                <small>+ {student.responsibles.length - 1}</small>
+                              )}
+                            </span>
+                          ) : (
+                            <span className="student-table-muted">Não informado</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                ))}
               </table>
             </div>
             {totalPages > 1 && (
               <nav className="student-pagination" aria-label="Paginação de alunos">
                 <button
+                  aria-label="Página anterior"
                   disabled={currentPage === 1}
                   onClick={() => setCurrentPage((page) => page - 1)}
                   type="button"
                 >
                   Anterior
                 </button>
-                <span aria-live="polite">Página {currentPage} de {totalPages}</span>
+                <div className="student-pagination-pages" aria-label="Selecionar página">
+                  {visiblePages.map((page, index) =>
+                    typeof page === "number" ? (
+                      <button
+                        aria-current={page === currentPage ? "page" : undefined}
+                        aria-label={`Página ${page}`}
+                        className={page === currentPage ? "active" : ""}
+                        key={page}
+                        onClick={() => setCurrentPage(page)}
+                        type="button"
+                      >
+                        {page}
+                      </button>
+                    ) : (
+                      <span aria-hidden="true" key={`${page}-${index}`}>…</span>
+                    ),
+                  )}
+                </div>
+                <span className="student-pagination-current" aria-live="polite">
+                  Página {currentPage} de {totalPages}
+                </span>
                 <button
+                  aria-label="Página siguiente"
                   disabled={currentPage === totalPages}
                   onClick={() => setCurrentPage((page) => page + 1)}
                   type="button"
@@ -486,16 +577,22 @@ export function StudentManagement({
           kind="students"
           onProfileUpdated={(updated) => {
             const fullName = updated.fullName;
+            const homeAddress = updated.homeAddress;
             const updatedResponsibles = updated.responsibles;
-            if (fullName && updatedResponsibles) {
-              setStudents((current) => current.map((student) =>
-                student.id === updated.id
-                  ? { ...student, fullName, responsibles: updatedResponsibles }
-                  : student,
-              ).sort((a, b) => a.fullName.localeCompare(b.fullName)));
-              setProfileStudent((current) => current
-                ? { ...current, fullName }
-                : current);
+            setStudents((current) => current.map((student) => {
+              if (student.id !== updated.id) return student;
+              return {
+                ...student,
+                ...(fullName ? { fullName } : {}),
+                ...(homeAddress !== undefined ? { homeAddress } : {}),
+                ...(updatedResponsibles ? { responsibles: updatedResponsibles } : {}),
+                ...(updated.isActive !== undefined ? { isActive: updated.isActive } : {}),
+                ...(updated.leaveDate !== undefined ? { leaveDate: updated.leaveDate } : {}),
+                ...(updated.leaveReason !== undefined ? { leaveReason: updated.leaveReason } : {}),
+              };
+            }).sort((a, b) => a.fullName.localeCompare(b.fullName)));
+            if (fullName) {
+              setProfileStudent((current) => current ? { ...current, fullName } : current);
             }
           }}
           onClose={() => setProfileStudent(null)}

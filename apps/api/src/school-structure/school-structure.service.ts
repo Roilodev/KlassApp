@@ -98,6 +98,7 @@ export class SchoolStructureService {
          WHERE student_enrollments.school_id = classes.school_id
            AND student_enrollments.class_id = classes.id
            AND student_enrollments.status = 'active'
+           AND students.is_active = true
        ) AS class_students ON true
        LEFT JOIN LATERAL (
          SELECT json_agg(

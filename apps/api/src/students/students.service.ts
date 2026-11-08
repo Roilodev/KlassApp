@@ -14,6 +14,7 @@ export interface ResponsibleInput {
 
 export interface CreateStudentInput {
   fullName: string;
+  homeAddress?: string;
   academicYear: number;
   classId: string;
   responsibles: ResponsibleInput[];
@@ -22,10 +23,14 @@ export interface CreateStudentInput {
 export interface StudentRecord {
   id: string;
   fullName: string;
+  homeAddress: string;
   hasPhoto: boolean;
-  academicYear: number;
-  grade: string;
-  className: string;
+  isActive: boolean;
+  leaveDate: string | null;
+  leaveReason: string | null;
+  academicYear: number | null;
+  grade: string | null;
+  className: string | null;
   responsibles: Array<{
     id: string;
     fullName: string;
@@ -43,14 +48,22 @@ export class StudentsService {
     const result = await this.database.query<{
       id: string;
       full_name: string;
-      academic_year: number;
-      grade: string;
-      class_name: string;
+      home_address: string | null;
+      academic_year: number | null;
+      grade: string | null;
+      class_name: string | null;
+      is_active: boolean;
+      leave_date: string | null;
+      leave_reason: string | null;
       has_photo: boolean;
       responsibles: StudentRecord['responsibles'];
     }>(
       `SELECT students.id,
               students.full_name,
+              students.home_address,
+              students.is_active,
+              students.leave_date::text AS leave_date,
+              students.leave_reason,
               academic_years.year AS academic_year,
               grades.name AS grade,
               classes.name AS class_name,
@@ -69,17 +82,22 @@ export class StudentsService {
                 '[]'::json
               ) AS responsibles
        FROM students
-       JOIN student_enrollments
-         ON student_enrollments.school_id = students.school_id
-        AND student_enrollments.student_id = students.id
-        AND student_enrollments.status = 'active'
-       JOIN academic_years
-         ON academic_years.school_id = student_enrollments.school_id
+       LEFT JOIN LATERAL (
+         SELECT enrollments.academic_year_id, enrollments.class_id
+         FROM student_enrollments AS enrollments
+         WHERE enrollments.school_id = students.school_id
+           AND enrollments.student_id = students.id
+         ORDER BY CASE WHEN enrollments.status = 'active' THEN 0 ELSE 1 END,
+                  enrollments.started_at DESC, enrollments.created_at DESC
+         LIMIT 1
+       ) AS student_enrollments ON true
+       LEFT JOIN academic_years
+         ON academic_years.school_id = students.school_id
         AND academic_years.id = student_enrollments.academic_year_id
-       JOIN classes
-         ON classes.school_id = student_enrollments.school_id
+       LEFT JOIN classes
+         ON classes.school_id = students.school_id
         AND classes.id = student_enrollments.class_id
-       JOIN grades
+       LEFT JOIN grades
          ON grades.school_id = classes.school_id
         AND grades.id = classes.grade_id
        LEFT JOIN student_responsibles
@@ -97,7 +115,11 @@ export class StudentsService {
     return result.rows.map((row) => ({
       id: row.id,
       fullName: row.full_name,
+      homeAddress: row.home_address ?? '',
       hasPhoto: row.has_photo,
+      isActive: row.is_active,
+      leaveDate: row.leave_date,
+      leaveReason: row.leave_reason,
       academicYear: row.academic_year,
       grade: row.grade,
       className: row.class_name,
@@ -117,6 +139,13 @@ export class StudentsService {
     const fullName = typeof input.fullName === 'string' ? input.fullName.trim() : '';
     if (fullName.length < 1 || fullName.length > 160) {
       throw new BadRequestException('O nome do aluno deve ter entre 1 e 160 caracteres.');
+    }
+    if (input.homeAddress !== undefined && typeof input.homeAddress !== 'string') {
+      throw new BadRequestException('Informe um endereço residencial válido.');
+    }
+    const homeAddress = typeof input.homeAddress === 'string' ? input.homeAddress.trim() : '';
+    if (homeAddress.length > 300) {
+      throw new BadRequestException('O endereço residencial deve ter no máximo 300 caracteres.');
     }
     if (
       typeof input.academicYear !== 'number' ||
@@ -199,8 +228,8 @@ export class StudentsService {
       }
 
       const studentResult = await client.query<{ id: string }>(
-        'INSERT INTO students (school_id, full_name, created_by) VALUES ($1, $2, $3) RETURNING id',
-        [schoolId, fullName, actorId],
+        'INSERT INTO students (school_id, full_name, home_address, created_by) VALUES ($1, $2, $3, $4) RETURNING id',
+        [schoolId, fullName, homeAddress || null, actorId],
       );
       const studentId = studentResult.rows[0].id;
 
@@ -262,7 +291,11 @@ export class StudentsService {
       return {
         id: studentId,
         fullName,
+        homeAddress,
         hasPhoto: false,
+        isActive: true,
+        leaveDate: null,
+        leaveReason: null,
         academicYear: schoolClass.year,
         grade: schoolClass.grade,
         className: schoolClass.name,

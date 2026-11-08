@@ -11,7 +11,7 @@ import { DatabaseService } from '../database/database.service.js';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const LOCAL_DATETIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
 
-export interface CreateEventInput {
+export interface EventDetailsInput {
   title: string;
   description?: string;
   startsAt: string;
@@ -20,6 +20,10 @@ export interface CreateEventInput {
   classId?: string;
   grade?: string;
   year?: number;
+}
+
+export interface CreateEventInput extends EventDetailsInput {
+  status?: 'draft' | 'published';
 }
 
 export interface SchoolEvent {
@@ -31,7 +35,10 @@ export interface SchoolEvent {
   audienceType: 'school' | 'grade' | 'class';
   audienceLabel: string;
   timeZone: string;
-  status: 'published' | 'cancelled';
+  classId: string | null;
+  grade: string | null;
+  year: number | null;
+  status: 'draft' | 'published' | 'cancelled';
   createdAt: string;
 }
 
@@ -44,7 +51,10 @@ interface EventRow {
   audience_type: 'school' | 'grade' | 'class';
   audience_label: string;
   time_zone: string;
-  status: 'published' | 'cancelled';
+  class_id: string | null;
+  audience_grade: string | null;
+  audience_year: number | null;
+  status: 'draft' | 'published' | 'cancelled';
   created_at: Date;
 }
 
@@ -58,6 +68,9 @@ function mapEvent(row: EventRow): SchoolEvent {
     audienceType: row.audience_type,
     audienceLabel: row.audience_label,
     timeZone: row.time_zone,
+    classId: row.class_id ?? null,
+    grade: row.audience_grade ?? null,
+    year: row.audience_year ?? null,
     status: row.status,
     createdAt: row.created_at.toISOString(),
   };
@@ -67,7 +80,18 @@ const EVENT_SELECT = `SELECT school_events.id, school_events.title,
                              school_events.description, school_events.starts_at,
                              school_events.location, school_events.audience_type,
                              school_events.status, school_events.created_at,
+                             school_events.class_id,
                              schools.timezone AS time_zone,
+                             CASE
+                               WHEN school_events.audience_type = 'grade'
+                                 THEN event_grade.name
+                               ELSE class_grade.name
+                             END AS audience_grade,
+                             CASE
+                               WHEN school_events.audience_type = 'grade'
+                                 THEN event_year.year
+                               ELSE class_year.year
+                             END AS audience_year,
                              CASE
                                WHEN school_events.audience_type = 'school'
                                  THEN 'Toda a escola'
@@ -140,7 +164,7 @@ export class EventsService {
     const result = await this.database.query<EventRow>(
       `${EVENT_SELECT}
        WHERE school_events.school_id = $1
-       ORDER BY school_events.starts_at DESC, school_events.created_at DESC`,
+       ORDER BY school_events.starts_at, school_events.created_at DESC`,
       [schoolId],
     );
     return result.rows.map(mapEvent);
@@ -152,72 +176,38 @@ export class EventsService {
     input: CreateEventInput,
   ): Promise<SchoolEvent> {
     if (
-      !input ||
-      typeof input !== 'object' ||
-      typeof input.title !== 'string' ||
-      typeof input.startsAt !== 'string' ||
-      (input.audienceType !== 'school' &&
-        input.audienceType !== 'grade' &&
-        input.audienceType !== 'class')
+      input?.status !== undefined &&
+      input.status !== 'draft' &&
+      input.status !== 'published'
     ) {
-      throw new BadRequestException('Informe título, data e público do evento.');
+      throw new BadRequestException('Informe um status válido para o evento.');
     }
-
-    const title = input.title.trim();
-    const description = input.description ?? '';
-    const location = input.location ?? '';
-    if (title.length < 1 || title.length > 160) {
-      throw new BadRequestException('O título deve ter entre 1 e 160 caracteres.');
-    }
-    if (typeof description !== 'string' || description.length > 2000) {
-      throw new BadRequestException('A descrição pode ter no máximo 2000 caracteres.');
-    }
-    if (typeof location !== 'string' || location.length > 160) {
-      throw new BadRequestException('O local pode ter no máximo 160 caracteres.');
-    }
-    if (!isValidLocalDateTime(input.startsAt)) {
-      throw new BadRequestException('Informe uma data e hora válidas para o evento.');
-    }
-    if (
-      input.audienceType === 'class' &&
-      (typeof input.classId !== 'string' || !UUID_PATTERN.test(input.classId))
-    ) {
-      throw new BadRequestException('Selecione uma turma válida para o evento.');
-    }
-    if (
-      input.audienceType === 'grade' &&
-      (typeof input.grade !== 'string' ||
-        input.grade.trim().length < 1 ||
-        input.grade.trim().length > 80 ||
-        !Number.isInteger(input.year) ||
-        (input.year ?? 0) < 2000 ||
-        (input.year ?? 0) > 2200)
-    ) {
-      throw new BadRequestException('Selecione o ano letivo e o ano escolar do evento.');
-    }
+    const details = validateEventDetails(input);
+    const status = input.status ?? 'published';
 
     const eventId = await this.database.transaction(async (client) => {
       const audience = await this.resolveAudience(client, schoolId, input);
       const eventResult = await client.query<{ id: string }>(
         `INSERT INTO school_events
            (school_id, title, description, starts_at, location, audience_type,
-            academic_year_id, grade_id, class_id, created_by)
+           academic_year_id, grade_id, class_id, created_by, status)
          SELECT $1, $2, $3, $4::timestamp AT TIME ZONE schools.timezone,
-                $5, $6, $7, $8, $9, $10
+               $5, $6, $7, $8, $9, $10, $11
          FROM schools
          WHERE schools.id = $1
          RETURNING id`,
         [
           schoolId,
-          title,
-          description.trim(),
+          details.title,
+          details.description,
           input.startsAt,
-          location.trim(),
+          details.location,
           input.audienceType,
           audience.academicYearId,
           audience.gradeId,
           audience.classId,
           createdBy,
+          status,
         ],
       );
       const eventId = eventResult.rows[0]?.id;
@@ -236,6 +226,7 @@ export class EventsService {
             audienceType: input.audienceType,
             audienceLabel: audience.label,
             startsAt: input.startsAt,
+            status,
           }),
         ],
       );
@@ -252,6 +243,128 @@ export class EventsService {
       throw new Error('O evento salvo não pôde ser carregado.');
     }
     return mapEvent(row);
+  }
+
+  async update(
+    schoolId: string,
+    updatedBy: string,
+    eventId: string,
+    input: EventDetailsInput,
+  ): Promise<SchoolEvent> {
+    if (!UUID_PATTERN.test(eventId)) {
+      throw new BadRequestException('Evento inválido.');
+    }
+    const details = validateEventDetails(input);
+
+    await this.database.transaction(async (client) => {
+      const current = await client.query<{ status: string }>(
+        `SELECT status
+         FROM school_events
+         WHERE school_id = $1 AND id = $2
+         FOR UPDATE`,
+        [schoolId, eventId],
+      );
+      const currentStatus = current.rows[0]?.status;
+      if (!currentStatus) {
+        throw new NotFoundException('O evento não foi encontrado.');
+      }
+      if (currentStatus === 'cancelled') {
+        throw new ConflictException('Não é possível editar um evento cancelado.');
+      }
+
+      const audience = await this.resolveAudience(client, schoolId, input);
+      await client.query(
+        `UPDATE school_events
+         SET title = $3,
+             description = $4,
+             starts_at = $5::timestamp AT TIME ZONE schools.timezone,
+             location = $6,
+             audience_type = $7,
+             academic_year_id = $8,
+             grade_id = $9,
+             class_id = $10
+         FROM schools
+         WHERE school_events.school_id = $1
+           AND school_events.id = $2
+           AND schools.id = school_events.school_id`,
+        [
+          schoolId,
+          eventId,
+          details.title,
+          details.description,
+          input.startsAt,
+          details.location,
+          input.audienceType,
+          audience.academicYearId,
+          audience.gradeId,
+          audience.classId,
+        ],
+      );
+
+      await client.query(
+        `INSERT INTO audit_logs (school_id, actor_id, action, entity_type, entity_id, details)
+         VALUES ($1, $2, 'event.updated', 'school_event', $3, $4::jsonb)`,
+        [
+          schoolId,
+          updatedBy,
+          eventId,
+          JSON.stringify({
+            audienceType: input.audienceType,
+            audienceLabel: audience.label,
+            startsAt: input.startsAt,
+          }),
+        ],
+      );
+    });
+
+    const result = await this.database.query<EventRow>(
+      `${EVENT_SELECT}
+       WHERE school_events.school_id = $1 AND school_events.id = $2`,
+      [schoolId, eventId],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      throw new Error('O evento atualizado não pôde ser carregado.');
+    }
+    return mapEvent(row);
+  }
+
+  async publish(
+    schoolId: string,
+    publishedBy: string,
+    eventId: string,
+  ): Promise<{ published: true }> {
+    if (!UUID_PATTERN.test(eventId)) {
+      throw new BadRequestException('Evento inválido.');
+    }
+
+    return this.database.transaction(async (client) => {
+      const result = await client.query<{ id: string; title: string }>(
+        `UPDATE school_events
+         SET status = 'published'
+         WHERE school_id = $1 AND id = $2 AND status = 'draft'
+         RETURNING id, title`,
+        [schoolId, eventId],
+      );
+      const event = result.rows[0];
+      if (!event) {
+        const existing = await client.query<{ status: string }>(
+          'SELECT status FROM school_events WHERE school_id = $1 AND id = $2',
+          [schoolId, eventId],
+        );
+        if (existing.rowCount) {
+          throw new ConflictException('Este evento não está mais como rascunho.');
+        }
+        throw new NotFoundException('O evento não foi encontrado.');
+      }
+
+      await client.query(
+        `INSERT INTO audit_logs (school_id, actor_id, action, entity_type, entity_id, details)
+         VALUES ($1, $2, 'event.published', 'school_event', $3, $4::jsonb)`,
+        [schoolId, publishedBy, event.id, JSON.stringify({ title: event.title })],
+      );
+      return { published: true };
+    });
   }
 
   async cancel(
@@ -295,7 +408,7 @@ export class EventsService {
   private async resolveAudience(
     client: PoolClient,
     schoolId: string,
-    input: CreateEventInput,
+    input: EventDetailsInput,
   ): Promise<{
     academicYearId: string | null;
     gradeId: string | null;
@@ -385,6 +498,63 @@ export class EventsService {
       label: `${gradeYear.grade} · ${gradeYear.year}`,
     };
   }
+}
+
+function validateEventDetails(input: EventDetailsInput): {
+  title: string;
+  description: string;
+  location: string;
+} {
+  if (
+    !input ||
+    typeof input !== 'object' ||
+    typeof input.title !== 'string' ||
+    typeof input.startsAt !== 'string' ||
+    (input.audienceType !== 'school' &&
+      input.audienceType !== 'grade' &&
+      input.audienceType !== 'class')
+  ) {
+    throw new BadRequestException('Informe título, data e público do evento.');
+  }
+
+  const title = input.title.trim();
+  const description = input.description ?? '';
+  const location = input.location ?? '';
+  if (title.length < 1 || title.length > 160) {
+    throw new BadRequestException('O título deve ter entre 1 e 160 caracteres.');
+  }
+  if (typeof description !== 'string' || description.length > 2000) {
+    throw new BadRequestException('A descrição pode ter no máximo 2000 caracteres.');
+  }
+  if (typeof location !== 'string' || location.length > 160) {
+    throw new BadRequestException('O local pode ter no máximo 160 caracteres.');
+  }
+  if (!isValidLocalDateTime(input.startsAt)) {
+    throw new BadRequestException('Informe uma data e hora válidas para o evento.');
+  }
+  if (
+    input.audienceType === 'class' &&
+    (typeof input.classId !== 'string' || !UUID_PATTERN.test(input.classId))
+  ) {
+    throw new BadRequestException('Selecione uma turma válida para o evento.');
+  }
+  if (
+    input.audienceType === 'grade' &&
+    (typeof input.grade !== 'string' ||
+      input.grade.trim().length < 1 ||
+      input.grade.trim().length > 80 ||
+      !Number.isInteger(input.year) ||
+      (input.year ?? 0) < 2000 ||
+      (input.year ?? 0) > 2200)
+  ) {
+    throw new BadRequestException('Selecione o ano letivo e o ano escolar do evento.');
+  }
+
+  return {
+    title,
+    description: description.trim(),
+    location: location.trim(),
+  };
 }
 
 function isValidLocalDateTime(value: string): boolean {

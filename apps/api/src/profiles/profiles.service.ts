@@ -13,8 +13,40 @@ const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
 type PhotoMimeType = (typeof PHOTO_TYPES)[number];
 type PhotoOwner = 'student' | 'teacher';
 
+export interface LeaveInput {
+  date: string;
+  reason: string;
+}
+
+function isValidLeaveDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day;
+}
+
+function validateLeaveInput(input: LeaveInput): { date: string; reason: string } {
+  if (
+    !input ||
+    typeof input !== 'object' ||
+    typeof input.date !== 'string' ||
+    !isValidLeaveDate(input.date) ||
+    typeof input.reason !== 'string'
+  ) {
+    throw new BadRequestException('Informe uma data e um motivo válidos para a baixa.');
+  }
+  const reason = input.reason.trim();
+  if (reason.length < 1 || reason.length > 500) {
+    throw new BadRequestException('O motivo da baixa deve ter entre 1 e 500 caracteres.');
+  }
+  return { date: input.date, reason };
+}
+
 export interface UpdateStudentProfileInput {
   fullName: string;
+  homeAddress?: string;
   responsibles: Array<{
     id?: string;
     fullName: string;
@@ -28,6 +60,7 @@ export interface UpdateTeacherProfileInput {
   displayName: string;
   email: string;
   phone: string;
+  homeAddress?: string;
   classIds: string[];
 }
 
@@ -48,6 +81,10 @@ export class ProfilesService {
   ) {
     const student = await this.database.query(
       `SELECT students.id, students.full_name AS "fullName",
+              CASE WHEN $4::text = 'admin' THEN students.home_address END AS "homeAddress",
+              students.is_active AS "isActive",
+              CASE WHEN $4::text = 'admin' THEN students.leave_date::text END AS "leaveDate",
+              CASE WHEN $4::text = 'admin' THEN students.leave_reason END AS "leaveReason",
               schools.name AS "schoolName",
               students.created_at AS "createdAt",
               (students.photo_data IS NOT NULL) AS "hasPhoto",
@@ -69,6 +106,7 @@ export class ProfilesService {
             AND teacher_class_assignments.user_id = $3
            WHERE student_enrollments.school_id = students.school_id
              AND student_enrollments.student_id = students.id
+             AND students.is_active = true
              AND student_enrollments.status = 'active'
          ))`,
       [schoolId, studentId, userId, role],
@@ -133,7 +171,7 @@ export class ProfilesService {
           [schoolId, studentId, role],
         ),
         this.database.query(
-          `SELECT assessments.id, assessments.title, assessments.subject,
+          `SELECT assessments.id, assessments.title, school_subjects.name AS subject,
                   assessments.scheduled_on::text AS "scheduledOn",
                   assessments.max_points AS "maxPoints",
                   assessment_results.score,
@@ -144,6 +182,9 @@ export class ProfilesService {
              ON assessments.school_id = student_enrollments.school_id
             AND assessments.class_id = student_enrollments.class_id
             AND assessments.academic_year_id = student_enrollments.academic_year_id
+           JOIN school_subjects
+             ON school_subjects.school_id = assessments.school_id
+            AND school_subjects.id = assessments.subject_id
            JOIN classes
              ON classes.school_id = assessments.school_id
             AND classes.id = assessments.class_id
@@ -201,6 +242,7 @@ export class ProfilesService {
                   school_events.audience_type AS "audienceType"
            FROM school_events
            WHERE school_events.school_id = $1
+             AND school_events.status <> 'draft'
              AND EXISTS (
                SELECT 1
                FROM student_enrollments
@@ -249,7 +291,7 @@ export class ProfilesService {
                   classes.name AS "className", class_schedules.day_of_week AS "dayOfWeek",
                   class_schedules.starts_at::text AS "startsAt",
                   class_schedules.ends_at::text AS "endsAt",
-                  class_schedules.subject,
+                  school_subjects.name AS subject,
                   users.display_name AS teacher
            FROM student_enrollments
            JOIN classes
@@ -264,6 +306,9 @@ export class ProfilesService {
            JOIN class_schedules
              ON class_schedules.school_id = classes.school_id
             AND class_schedules.class_id = classes.id
+           JOIN school_subjects
+             ON school_subjects.school_id = class_schedules.school_id
+            AND school_subjects.id = class_schedules.subject_id
            LEFT JOIN users ON users.id = class_schedules.teacher_id
            WHERE student_enrollments.school_id = $1
              AND student_enrollments.student_id = $2
@@ -296,7 +341,10 @@ export class ProfilesService {
       `SELECT users.id, users.display_name AS "displayName",
               users.email, users.created_at AS "createdAt", schools.name AS "schoolName",
               school_memberships.phone_e164 AS phone,
+              school_memberships.home_address AS "homeAddress",
               school_memberships.is_active AS "isActive",
+              school_memberships.leave_date::text AS "leaveDate",
+              school_memberships.leave_reason AS "leaveReason",
               EXISTS (
                 SELECT 1 FROM teacher_photos
                 WHERE teacher_photos.school_id = school_memberships.school_id
@@ -335,7 +383,7 @@ export class ProfilesService {
                 class_schedules.day_of_week AS "dayOfWeek",
                 class_schedules.starts_at::text AS "startsAt",
                 class_schedules.ends_at::text AS "endsAt",
-                class_schedules.subject
+                school_subjects.name AS subject
          FROM class_schedules
          JOIN classes
            ON classes.school_id = class_schedules.school_id
@@ -345,6 +393,9 @@ export class ProfilesService {
           AND academic_years.id = classes.academic_year_id
          JOIN grades ON grades.school_id = classes.school_id
                     AND grades.id = classes.grade_id
+         JOIN school_subjects
+           ON school_subjects.school_id = class_schedules.school_id
+          AND school_subjects.id = class_schedules.subject_id
          WHERE class_schedules.school_id = $1
            AND class_schedules.teacher_id = $2
          ORDER BY academic_years.year DESC, class_schedules.day_of_week,
@@ -352,7 +403,7 @@ export class ProfilesService {
         [schoolId, teacherId],
       ),
       this.database.query(
-        `SELECT assessments.id, assessments.title, assessments.subject,
+        `SELECT assessments.id, assessments.title, school_subjects.name AS subject,
                 assessments.scheduled_on::text AS "scheduledOn",
                 assessments.max_points AS "maxPoints",
                 grades.name || ' · Turma ' || classes.name AS "classLabel",
@@ -361,6 +412,9 @@ export class ProfilesService {
                  WHERE assessment_results.school_id = assessments.school_id
                    AND assessment_results.assessment_id = assessments.id) AS "resultsRecorded"
          FROM assessments
+         JOIN school_subjects
+           ON school_subjects.school_id = assessments.school_id
+          AND school_subjects.id = assessments.subject_id
          JOIN classes
            ON classes.school_id = assessments.school_id
           AND classes.id = assessments.class_id
@@ -388,9 +442,13 @@ export class ProfilesService {
          JOIN teacher_class_assignments
            ON teacher_class_assignments.school_id = student_enrollments.school_id
           AND teacher_class_assignments.class_id = student_enrollments.class_id
+         JOIN students
+           ON students.school_id = student_enrollments.school_id
+          AND students.id = student_enrollments.student_id
          WHERE student_enrollments.school_id = $1
            AND teacher_class_assignments.user_id = $2
-           AND student_enrollments.status = 'active'`,
+           AND student_enrollments.status = 'active'
+           AND students.is_active = true`,
         [schoolId, teacherId],
       ),
       this.database.query(
@@ -415,6 +473,7 @@ export class ProfilesService {
            ON academic_years.school_id = school_events.school_id
           AND academic_years.id = school_events.academic_year_id
          WHERE school_events.school_id = $1
+           AND school_events.status <> 'draft'
            AND (
              school_events.created_by = $2
              OR EXISTS (
@@ -462,6 +521,15 @@ export class ProfilesService {
     const fullName = typeof input.fullName === 'string' ? input.fullName.trim() : '';
     if (fullName.length < 1 || fullName.length > 160) {
       throw new BadRequestException('O nome do aluno deve ter entre 1 e 160 caracteres.');
+    }
+    if (input.homeAddress !== undefined && typeof input.homeAddress !== 'string') {
+      throw new BadRequestException('Informe um endereço residencial válido.');
+    }
+    const requestedHomeAddress = typeof input.homeAddress === 'string'
+      ? input.homeAddress.trim()
+      : undefined;
+    if ((requestedHomeAddress ?? '').length > 300) {
+      throw new BadRequestException('O endereço residencial deve ter no máximo 300 caracteres.');
     }
     if (!Array.isArray(input.responsibles) || input.responsibles.length < 1 || input.responsibles.length > 5) {
       throw new BadRequestException('Informe de 1 a 5 responsáveis pelo aluno.');
@@ -514,8 +582,8 @@ export class ProfilesService {
     }
 
     return this.database.transaction(async (client) => {
-      const studentResult = await client.query<{ full_name: string }>(
-        `SELECT full_name FROM students
+      const studentResult = await client.query<{ full_name: string; home_address: string | null }>(
+        `SELECT full_name, home_address FROM students
          WHERE school_id = $1 AND id = $2
          FOR UPDATE`,
         [schoolId, studentId],
@@ -523,6 +591,7 @@ export class ProfilesService {
       if (!studentResult.rows[0]) {
         throw new NotFoundException('Aluno não encontrado nesta escola.');
       }
+      const homeAddress = requestedHomeAddress ?? studentResult.rows[0].home_address ?? '';
       const existingResult = await client.query<{
         id: string;
         phone_e164: string;
@@ -551,8 +620,8 @@ export class ProfilesService {
       }
 
       await client.query(
-        'UPDATE students SET full_name = $3 WHERE school_id = $1 AND id = $2',
-        [schoolId, studentId, fullName],
+        'UPDATE students SET full_name = $3, home_address = $4 WHERE school_id = $1 AND id = $2',
+        [schoolId, studentId, fullName, homeAddress || null],
       );
       const updatedResponsibles: Array<{
         id: string;
@@ -676,6 +745,7 @@ export class ProfilesService {
           studentId,
           JSON.stringify({
             nameChanged,
+            homeAddressChanged: studentResult.rows[0].home_address !== (homeAddress || null),
             responsibleCount: updatedResponsibles.length,
             responsibleChanges: {
               added: responsibles.filter((responsible) => !responsible.id).length,
@@ -685,7 +755,7 @@ export class ProfilesService {
           }),
         ],
       );
-      return { id: studentId, fullName, responsibles: updatedResponsibles };
+      return { id: studentId, fullName, homeAddress, responsibles: updatedResponsibles };
     });
   }
 
@@ -702,6 +772,7 @@ export class ProfilesService {
       typeof input.displayName !== 'string' ||
       typeof input.email !== 'string' ||
       typeof input.phone !== 'string' ||
+      (input.homeAddress !== undefined && typeof input.homeAddress !== 'string') ||
       !Array.isArray(input.classIds)
     ) {
       throw new BadRequestException('Informe nome, email, telefone e turmas do professor.');
@@ -709,6 +780,9 @@ export class ProfilesService {
     const displayName = input.displayName.trim();
     const email = input.email.trim().toLowerCase();
     const phone = this.normalizeBrazilianPhone(input.phone);
+    const requestedHomeAddress = typeof input.homeAddress === 'string'
+      ? input.homeAddress.trim()
+      : undefined;
     const classIds = [...new Set(input.classIds)];
     if (displayName.length < 1 || displayName.length > 160) {
       throw new BadRequestException('O nome deve ter entre 1 e 160 caracteres.');
@@ -718,6 +792,9 @@ export class ProfilesService {
     }
     if (!phone) {
       throw new BadRequestException('Informe um telefone brasileiro válido com DDD.');
+    }
+    if ((requestedHomeAddress ?? '').length > 300) {
+      throw new BadRequestException('O endereço residencial deve ter no máximo 300 caracteres.');
     }
     if (
       classIds.length > 100 ||
@@ -735,8 +812,10 @@ export class ProfilesService {
           display_name: string;
           email: string;
           phone_e164: string | null;
+          home_address: string | null;
         }>(
-          `SELECT users.display_name, users.email, school_memberships.phone_e164
+          `SELECT users.display_name, users.email, school_memberships.phone_e164,
+                  school_memberships.home_address
            FROM users
            JOIN school_memberships
              ON school_memberships.user_id = users.id
@@ -750,6 +829,7 @@ export class ProfilesService {
         if (!teacher) {
           throw new NotFoundException('Professor não encontrado nesta escola.');
         }
+        const homeAddress = requestedHomeAddress ?? teacher.home_address ?? '';
         const classResult = await client.query<{
           id: string;
           year: number;
@@ -804,9 +884,9 @@ export class ProfilesService {
         );
         await client.query(
           `UPDATE school_memberships
-           SET phone_e164 = $3
+           SET phone_e164 = $3, home_address = $4
            WHERE school_id = $1 AND user_id = $2 AND role = 'teacher'`,
-          [schoolId, teacherId, phone],
+          [schoolId, teacherId, phone, homeAddress || null],
         );
         if (removedClassIds.length > 0) {
           await client.query(
@@ -835,6 +915,7 @@ export class ProfilesService {
               nameChanged: teacher.display_name !== displayName,
               emailChanged: teacher.email !== email,
               phoneChanged: teacher.phone_e164 !== phone,
+              homeAddressChanged: teacher.home_address !== (homeAddress || null),
               addedClassIds: classIds.filter(
                 (id) => !currentClasses.rows.some((row) => row.class_id === id),
               ),
@@ -847,6 +928,7 @@ export class ProfilesService {
           displayName,
           email,
           phone,
+          homeAddress,
           classes: classResult.rows,
         };
       });
@@ -863,6 +945,104 @@ export class ProfilesService {
       }
       throw error;
     }
+  }
+
+  async leaveStudent(
+    schoolId: string,
+    actorId: string,
+    studentId: string,
+    input: LeaveInput,
+  ) {
+    const leave = validateLeaveInput(input);
+    return this.database.transaction(async (client) => {
+      const updated = await client.query<{ id: string }>(
+        `UPDATE students
+         SET is_active = false, leave_date = $3::date, leave_reason = $4
+         WHERE school_id = $1 AND id = $2 AND is_active = true
+         RETURNING id`,
+        [schoolId, studentId, leave.date, leave.reason],
+      );
+      if (!updated.rows[0]) {
+        throw new NotFoundException('Aluno não encontrado ou já está de baixa.');
+      }
+      await client.query(
+        `INSERT INTO audit_logs (school_id, actor_id, action, entity_type, entity_id, details)
+         VALUES ($1, $2, 'student.left', 'student', $3, $4::jsonb)`,
+        [schoolId, actorId, studentId, JSON.stringify(leave)],
+      );
+      return { id: studentId, isActive: false, leaveDate: leave.date, leaveReason: leave.reason };
+    });
+  }
+
+  async reactivateStudent(schoolId: string, actorId: string, studentId: string) {
+    return this.database.transaction(async (client) => {
+      const updated = await client.query<{ id: string }>(
+        `UPDATE students
+         SET is_active = true, leave_date = NULL, leave_reason = NULL
+         WHERE school_id = $1 AND id = $2 AND is_active = false
+         RETURNING id`,
+        [schoolId, studentId],
+      );
+      if (!updated.rows[0]) {
+        throw new NotFoundException('Aluno não encontrado ou já está ativo.');
+      }
+      await client.query(
+        `INSERT INTO audit_logs (school_id, actor_id, action, entity_type, entity_id, details)
+         VALUES ($1, $2, 'student.reactivated', 'student', $3, '{}'::jsonb)`,
+        [schoolId, actorId, studentId],
+      );
+      return { id: studentId, isActive: true, leaveDate: null, leaveReason: null };
+    });
+  }
+
+  async leaveTeacher(
+    schoolId: string,
+    actorId: string,
+    teacherId: string,
+    input: LeaveInput,
+  ) {
+    const leave = validateLeaveInput(input);
+    return this.database.transaction(async (client) => {
+      const updated = await client.query<{ user_id: string }>(
+        `UPDATE school_memberships
+         SET is_active = false, leave_date = $3::date, leave_reason = $4
+         WHERE school_id = $1 AND user_id = $2
+           AND role = 'teacher' AND is_active = true
+         RETURNING user_id`,
+        [schoolId, teacherId, leave.date, leave.reason],
+      );
+      if (!updated.rows[0]) {
+        throw new NotFoundException('Professor não encontrado ou já está de baixa.');
+      }
+      await client.query(
+        `INSERT INTO audit_logs (school_id, actor_id, action, entity_type, entity_id, details)
+         VALUES ($1, $2, 'teacher.left', 'teacher', $3, $4::jsonb)`,
+        [schoolId, actorId, teacherId, JSON.stringify(leave)],
+      );
+      return { id: teacherId, isActive: false, leaveDate: leave.date, leaveReason: leave.reason };
+    });
+  }
+
+  async reactivateTeacher(schoolId: string, actorId: string, teacherId: string) {
+    return this.database.transaction(async (client) => {
+      const updated = await client.query<{ user_id: string }>(
+        `UPDATE school_memberships
+         SET is_active = true, leave_date = NULL, leave_reason = NULL
+         WHERE school_id = $1 AND user_id = $2
+           AND role = 'teacher' AND is_active = false
+         RETURNING user_id`,
+        [schoolId, teacherId],
+      );
+      if (!updated.rows[0]) {
+        throw new NotFoundException('Professor não encontrado ou já está ativo.');
+      }
+      await client.query(
+        `INSERT INTO audit_logs (school_id, actor_id, action, entity_type, entity_id, details)
+         VALUES ($1, $2, 'teacher.reactivated', 'teacher', $3, '{}'::jsonb)`,
+        [schoolId, actorId, teacherId],
+      );
+      return { id: teacherId, isActive: true, leaveDate: null, leaveReason: null };
+    });
   }
 
   async getPhoto(
@@ -885,6 +1065,7 @@ export class ProfilesService {
           AND teacher_class_assignments.class_id = student_enrollments.class_id
           AND teacher_class_assignments.user_id = $3
          WHERE students.school_id = $1 AND students.id = $2
+           AND students.is_active = true
          LIMIT 1`,
         [schoolId, personId, userId],
       );

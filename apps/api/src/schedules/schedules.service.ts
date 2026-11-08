@@ -15,13 +15,14 @@ export interface CreateScheduleInput {
   dayOfWeek: number;
   startsAt: string;
   endsAt: string;
-  subject: string;
+  subjectId: string;
   teacherId?: string | null;
 }
 
 export interface ScheduleRecord {
   id: string;
   classId: string;
+  subjectId: string;
   classLabel: string;
   year: number;
   dayOfWeek: number;
@@ -35,6 +36,7 @@ export interface ScheduleRecord {
 interface ScheduleRow {
   id: string;
   class_id: string;
+  subject_id: string;
   class_label: string;
   year: number;
   day_of_week: number;
@@ -47,10 +49,10 @@ interface ScheduleRow {
 
 interface NormalizedScheduleInput {
   classId: string;
+  subjectId: string;
   dayOfWeek: number;
   startsAt: string;
   endsAt: string;
-  subject: string;
   teacherId: string | null;
 }
 
@@ -62,13 +64,13 @@ function validateScheduleInput(input: CreateScheduleInput): NormalizedScheduleIn
     typeof input.dayOfWeek !== 'number' ||
     typeof input.startsAt !== 'string' ||
     typeof input.endsAt !== 'string' ||
-    typeof input.subject !== 'string'
+    typeof input.subjectId !== 'string'
   ) {
     throw new BadRequestException('Informe os dados do horário.');
   }
 
   const classId = input.classId.trim();
-  const subject = input.subject.trim();
+  const subjectId = input.subjectId.trim();
   const teacherId = input.teacherId ?? null;
   if (!UUID_PATTERN.test(classId)) {
     throw new BadRequestException('Selecione uma turma válida.');
@@ -80,18 +82,18 @@ function validateScheduleInput(input: CreateScheduleInput): NormalizedScheduleIn
       input.startsAt >= input.endsAt) {
     throw new BadRequestException('Informe um horário de início e fim válidos.');
   }
-  if (subject.length < 1 || subject.length > 80) {
-    throw new BadRequestException('A disciplina deve ter entre 1 e 80 caracteres.');
+  if (!UUID_PATTERN.test(subjectId)) {
+    throw new BadRequestException('Selecione uma matéria válida.');
   }
   if (teacherId !== null && (typeof teacherId !== 'string' || !UUID_PATTERN.test(teacherId))) {
     throw new BadRequestException('Selecione um professor válido.');
   }
   return {
     classId,
+    subjectId,
     dayOfWeek: input.dayOfWeek,
     startsAt: input.startsAt,
     endsAt: input.endsAt,
-    subject,
     teacherId,
   };
 }
@@ -100,6 +102,7 @@ function mapSchedule(row: ScheduleRow): ScheduleRecord {
   return {
     id: row.id,
     classId: row.class_id,
+    subjectId: row.subject_id,
     classLabel: row.class_label,
     year: row.year,
     dayOfWeek: row.day_of_week,
@@ -116,7 +119,8 @@ const SCHEDULE_SELECT = `SELECT class_schedules.id, class_schedules.class_id,
                                 academic_years.year, class_schedules.day_of_week,
                                 class_schedules.starts_at::text AS starts_at,
                                 class_schedules.ends_at::text AS ends_at,
-                                class_schedules.subject, class_schedules.teacher_id,
+                                class_schedules.subject_id, school_subjects.name AS subject,
+                                class_schedules.teacher_id,
                                 users.display_name AS teacher_name
                          FROM class_schedules
                          JOIN classes
@@ -128,6 +132,9 @@ const SCHEDULE_SELECT = `SELECT class_schedules.id, class_schedules.class_id,
                          JOIN grades
                            ON grades.school_id = classes.school_id
                           AND grades.id = classes.grade_id
+                         JOIN school_subjects
+                           ON school_subjects.school_id = class_schedules.school_id
+                          AND school_subjects.id = class_schedules.subject_id
                          LEFT JOIN users ON users.id = class_schedules.teacher_id`;
 
 @Injectable()
@@ -139,7 +146,7 @@ export class SchedulesService {
       `${SCHEDULE_SELECT}
        WHERE class_schedules.school_id = $1
        ORDER BY class_schedules.day_of_week, class_schedules.starts_at,
-                class_label, class_schedules.subject`,
+                class_label, school_subjects.name`,
       [schoolId],
     );
     return result.rows.map(mapSchedule);
@@ -150,7 +157,7 @@ export class SchedulesService {
     createdBy: string,
     input: CreateScheduleInput,
   ): Promise<ScheduleRecord> {
-    const { classId, dayOfWeek, startsAt, endsAt, subject, teacherId } =
+    const { classId, subjectId, dayOfWeek, startsAt, endsAt, teacherId } =
       validateScheduleInput(input);
 
     return this.database.transaction(async (client) => {
@@ -162,18 +169,35 @@ export class SchedulesService {
       if (schoolClass.rowCount !== 1) {
         throw new NotFoundException('A turma selecionada não foi encontrada.');
       }
+      const schoolSubject = await client.query(
+        'SELECT id FROM school_subjects WHERE school_id = $1 AND id = $2',
+        [schoolId, subjectId],
+      );
+      if (schoolSubject.rowCount !== 1) {
+        throw new NotFoundException('A matéria selecionada não foi encontrada.');
+      }
 
       if (teacherId) {
         const assignment = await client.query(
-          `SELECT 1 FROM teacher_class_assignments
-           WHERE school_id = $1 AND class_id = $2 AND user_id = $3`,
-          [schoolId, classId, teacherId],
+          `SELECT 1
+           FROM teacher_class_assignments
+           JOIN teacher_subject_assignments
+             ON teacher_subject_assignments.school_id = teacher_class_assignments.school_id
+            AND teacher_subject_assignments.user_id = teacher_class_assignments.user_id
+           WHERE teacher_class_assignments.school_id = $1
+             AND teacher_class_assignments.class_id = $2
+             AND teacher_class_assignments.user_id = $3
+             AND teacher_subject_assignments.subject_id = $4`,
+          [schoolId, classId, teacherId, subjectId],
         );
         if (assignment.rowCount !== 1) {
-          throw new BadRequestException('O professor precisa estar atribuído à turma selecionada.');
+          throw new BadRequestException(
+            'O professor precisa estar atribuído à turma e à matéria selecionadas.',
+          );
         }
       }
 
+      await this.assertOutsideSchoolRecess(client, schoolId, dayOfWeek, startsAt, endsAt);
       const overlapping = await client.query<{
         class_conflict: boolean;
         teacher_conflict: boolean;
@@ -198,16 +222,16 @@ export class SchedulesService {
 
       const inserted = await client.query<{ id: string }>(
         `INSERT INTO class_schedules
-           (school_id, class_id, day_of_week, starts_at, ends_at, subject, teacher_id, created_by)
-         VALUES ($1, $2, $3, $4::time, $5::time, $6, $7, $8)
+           (school_id, class_id, subject_id, day_of_week, starts_at, ends_at, teacher_id, created_by)
+         VALUES ($1, $2, $3, $4, $5::time, $6::time, $7, $8)
          RETURNING id`,
         [
           schoolId,
           classId,
+          subjectId,
           dayOfWeek,
           startsAt,
           endsAt,
-          subject,
           teacherId,
           createdBy,
         ],
@@ -224,7 +248,7 @@ export class SchedulesService {
           schoolId,
           createdBy,
           scheduleId,
-          JSON.stringify({ classId, dayOfWeek, subject }),
+          JSON.stringify({ classId, dayOfWeek, subjectId }),
         ],
       );
 
@@ -250,7 +274,7 @@ export class SchedulesService {
     if (!UUID_PATTERN.test(scheduleId)) {
       throw new BadRequestException('Horário inválido.');
     }
-    const { classId, dayOfWeek, startsAt, endsAt, subject, teacherId } =
+    const { classId, subjectId, dayOfWeek, startsAt, endsAt, teacherId } =
       validateScheduleInput(input);
 
     return this.database.transaction(async (client) => {
@@ -273,18 +297,35 @@ export class SchedulesService {
       if (schoolClass.rowCount !== 1) {
         throw new NotFoundException('A turma selecionada não foi encontrada.');
       }
+      const schoolSubject = await client.query(
+        'SELECT id FROM school_subjects WHERE school_id = $1 AND id = $2',
+        [schoolId, subjectId],
+      );
+      if (schoolSubject.rowCount !== 1) {
+        throw new NotFoundException('A matéria selecionada não foi encontrada.');
+      }
 
       if (teacherId) {
         const assignment = await client.query(
-          `SELECT 1 FROM teacher_class_assignments
-           WHERE school_id = $1 AND class_id = $2 AND user_id = $3`,
-          [schoolId, classId, teacherId],
+          `SELECT 1
+           FROM teacher_class_assignments
+           JOIN teacher_subject_assignments
+             ON teacher_subject_assignments.school_id = teacher_class_assignments.school_id
+            AND teacher_subject_assignments.user_id = teacher_class_assignments.user_id
+           WHERE teacher_class_assignments.school_id = $1
+             AND teacher_class_assignments.class_id = $2
+             AND teacher_class_assignments.user_id = $3
+             AND teacher_subject_assignments.subject_id = $4`,
+          [schoolId, classId, teacherId, subjectId],
         );
-        if (assignment.rowCount !== 1) {
-          throw new BadRequestException('O professor precisa estar atribuído à turma selecionada.');
+        if (assignment.rowCount !== 1 && previous.teacher_id !== teacherId) {
+          throw new BadRequestException(
+            'O professor precisa estar atribuído à turma e à matéria selecionadas.',
+          );
         }
       }
 
+      await this.assertOutsideSchoolRecess(client, schoolId, dayOfWeek, startsAt, endsAt);
       const overlapping = await client.query<{
         class_conflict: boolean;
         teacher_conflict: boolean;
@@ -311,9 +352,9 @@ export class SchedulesService {
       await client.query(
         `UPDATE class_schedules
          SET class_id = $3, day_of_week = $4, starts_at = $5::time,
-             ends_at = $6::time, subject = $7, teacher_id = $8
+             ends_at = $6::time, subject_id = $7, teacher_id = $8
          WHERE school_id = $1 AND id = $2`,
-        [schoolId, scheduleId, classId, dayOfWeek, startsAt, endsAt, subject, teacherId],
+        [schoolId, scheduleId, classId, dayOfWeek, startsAt, endsAt, subjectId, teacherId],
       );
 
       const result = await client.query<ScheduleRow>(
@@ -352,10 +393,14 @@ export class SchedulesService {
         day_of_week: number;
         subject: string;
       }>(
-        `SELECT class_id, day_of_week, subject
+        `SELECT class_schedules.class_id, class_schedules.day_of_week,
+                school_subjects.name AS subject
          FROM class_schedules
-         WHERE school_id = $1 AND id = $2
-         FOR UPDATE`,
+         JOIN school_subjects
+           ON school_subjects.school_id = class_schedules.school_id
+          AND school_subjects.id = class_schedules.subject_id
+         WHERE class_schedules.school_id = $1 AND class_schedules.id = $2
+         FOR UPDATE OF class_schedules`,
         [schoolId, scheduleId],
       );
       const schedule = existing.rows[0];
@@ -387,5 +432,28 @@ export class SchedulesService {
 
   private lockSchoolSchedules(client: PoolClient, schoolId: string): Promise<unknown> {
     return client.query('SELECT pg_advisory_xact_lock(hashtext($1), 0)', [schoolId]);
+  }
+
+  private async assertOutsideSchoolRecess(
+    client: PoolClient,
+    schoolId: string,
+    dayOfWeek: number,
+    startsAt: string,
+    endsAt: string,
+  ): Promise<void> {
+    if (dayOfWeek > 5) {
+      return;
+    }
+    const result = await client.query<{ starts_at: string; ends_at: string }>(
+      `SELECT starts_at::text AS starts_at, ends_at::text AS ends_at
+       FROM school_recesses
+       WHERE school_id = $1
+         AND starts_at < $3::time
+         AND ends_at > $2::time`,
+      [schoolId, startsAt, endsAt],
+    );
+    if (result.rowCount) {
+      throw new ConflictException('Este horário se sobrepõe ao recreio escolar.');
+    }
   }
 }

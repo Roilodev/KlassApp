@@ -64,12 +64,25 @@ describe('EventsService', () => {
     await expect(service.nextFor('school-id', 'user-id', 'admin')).resolves.toBeNull();
   });
 
+  it('lists events in chronological order', async () => {
+    const { service, query } = makeService(async () => ({ rows: [], rowCount: 0 }));
+
+    await expect(service.list('school-id')).resolves.toEqual([]);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'ORDER BY school_events.starts_at, school_events.created_at DESC',
+      ),
+      ['school-id'],
+    );
+  });
+
   it.each([
     ['blank title', { ...validClassEvent, title: '   ' }],
     ['invalid date', { ...validClassEvent, startsAt: 'not-a-date' }],
     ['malformed date', { ...validClassEvent, startsAt: '2026-02-31T09:00' }],
     ['missing class', { ...validClassEvent, classId: 'not-a-uuid' }],
     ['overlong description', { ...validClassEvent, description: 'x'.repeat(2001) }],
+    ['invalid status', { ...validClassEvent, status: 'cancelled' }],
   ])('rejects %s before touching the database', async (_case, input) => {
     const { service, query, transaction } = makeService(async () => ({ rows: [], rowCount: 0 }));
     await expect(service.create('school-id', 'user-id', input)).rejects.toBeInstanceOf(
@@ -177,7 +190,110 @@ describe('EventsService', () => {
       null,
       null,
       'user-id',
+      'published',
     ]);
+  });
+
+  it('creates an event as a draft when requested', async () => {
+    const queryHandler = vi.fn(async (sql: string) => {
+      if (sql.includes('INSERT INTO school_events')) {
+        return { rows: [{ id: eventId }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT school_events.id')) {
+        return {
+          rows: [{
+            id: eventId,
+            title: 'Reunião comunitária',
+            description: '',
+            starts_at: new Date('2026-11-15T12:00:00.000Z'),
+            location: '',
+            audience_type: 'school',
+            audience_label: 'Toda a escola',
+            time_zone: 'America/Sao_Paulo',
+            status: 'draft',
+            created_at: new Date('2026-11-07T12:00:00.000Z'),
+          }],
+          rowCount: 1,
+        };
+      }
+      return { rows: [], rowCount: 1 };
+    });
+    const { service, query } = makeService(queryHandler);
+
+    await expect(service.create('school-id', 'user-id', {
+      title: 'Reunião comunitária',
+      startsAt: '2026-11-15T09:00',
+      audienceType: 'school',
+      status: 'draft',
+    })).resolves.toMatchObject({ status: 'draft' });
+
+    const insertCall = query.mock.calls.find(([sql]) => sql.includes('INSERT INTO school_events'));
+    expect(insertCall?.[1]?.at(-1)).toBe('draft');
+  });
+
+  it('updates event details and records the change in the audit log', async () => {
+    const queryHandler = vi.fn(async (sql: string) => {
+      if (sql.includes('SELECT status') && sql.includes('FOR UPDATE')) {
+        return { rows: [{ status: 'published' }], rowCount: 1 };
+      }
+      if (sql.includes('UPDATE school_events')) {
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('SELECT school_events.id')) {
+        return {
+          rows: [{
+            id: eventId,
+            title: 'Evento atualizado',
+            description: '',
+            starts_at: new Date(validClassEvent.startsAt),
+            location: '',
+            audience_type: 'school',
+            audience_label: 'Toda a escola',
+            time_zone: 'America/Sao_Paulo',
+            class_id: null,
+            audience_grade: null,
+            audience_year: null,
+            status: 'published',
+            created_at: new Date(validClassEvent.startsAt),
+          }],
+          rowCount: 1,
+        };
+      }
+      return { rows: [], rowCount: 1 };
+    });
+    const { service, query } = makeService(queryHandler);
+
+    await expect(service.update('school-id', 'user-id', eventId, {
+      title: 'Evento atualizado',
+      startsAt: validClassEvent.startsAt,
+      audienceType: 'school',
+    })).resolves.toMatchObject({
+      id: eventId,
+      title: 'Evento atualizado',
+      status: 'published',
+    });
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("'event.updated'"),
+      expect.anything(),
+    );
+  });
+
+  it('publishes a draft and records the action in the audit log', async () => {
+    const queryHandler = vi.fn(async (sql: string) => {
+      if (sql.includes('UPDATE school_events')) {
+        return { rows: [{ id: eventId, title: 'Reunião comunitária' }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 1 };
+    });
+    const { service, query } = makeService(queryHandler);
+
+    await expect(service.publish('school-id', 'user-id', eventId)).resolves.toEqual({
+      published: true,
+    });
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("'event.published'"),
+      expect.anything(),
+    );
   });
 
   it('cancels a published event and audits the cancellation', async () => {

@@ -8,6 +8,7 @@ describe('DashboardService', () => {
       rows: [{
         students: 12,
         classes: 4,
+        subjects: 7,
         teachers: 5,
         schedules: 20,
         events: 3,
@@ -23,6 +24,7 @@ describe('DashboardService', () => {
     await expect(service.getSummary('school-id', 'admin-id', 'admin')).resolves.toEqual({
       students: 12,
       classes: 4,
+      subjects: 7,
       teachers: 5,
       schedules: 20,
       events: 3,
@@ -42,6 +44,7 @@ describe('DashboardService', () => {
       rows: [{
         students: 4,
         classes: 2,
+        subjects: 7,
         teachers: null,
         schedules: 7,
         events: null,
@@ -57,6 +60,7 @@ describe('DashboardService', () => {
     await expect(service.getSummary('school-id', 'teacher-id', 'teacher')).resolves.toEqual({
       students: 4,
       classes: 2,
+      subjects: 7,
       teachers: null,
       schedules: 7,
       events: null,

@@ -28,6 +28,10 @@ import { ProfilesController } from './profiles/profiles.controller.js';
 import { ProfilesService } from './profiles/profiles.service.js';
 import { DashboardController } from './dashboard/dashboard.controller.js';
 import { DashboardService } from './dashboard/dashboard.service.js';
+import { SubjectsController } from './subjects/subjects.controller.js';
+import { SubjectsService } from './subjects/subjects.service.js';
+import { SettingsController } from './settings/settings.controller.js';
+import { SettingsService } from './settings/settings.service.js';
 
 @Module({
   imports: [
@@ -50,6 +54,8 @@ import { DashboardService } from './dashboard/dashboard.service.js';
     BehaviorController,
     ProfilesController,
     DashboardController,
+    SubjectsController,
+    SettingsController,
   ],
   providers: [
     AppService,
@@ -66,6 +72,8 @@ import { DashboardService } from './dashboard/dashboard.service.js';
     BehaviorService,
     ProfilesService,
     DashboardService,
+    SubjectsService,
+    SettingsService,
     {
       provide: APP_GUARD,
       useClass: AuthGuard,

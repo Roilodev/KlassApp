@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { EntryFormDialog } from "../entry-form-dialog";
+import type { SchoolSubject } from "../horarios/schedule-management";
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -19,6 +20,7 @@ export interface AssessmentRecord {
   classLabel: string;
   year: number;
   title: string;
+  subjectId: string;
   subject: string;
   scheduledOn: string;
   maxPoints: number;
@@ -34,6 +36,7 @@ interface StudentResult {
 interface AssessmentManagementProps {
   initialAssessments: AssessmentRecord[];
   classes: AssessmentClass[];
+  subjects: SchoolSubject[];
 }
 
 function sortAssessments(assessments: AssessmentRecord[]) {
@@ -55,11 +58,12 @@ function formatAssessmentDate(value: string) {
 export function AssessmentManagement({
   initialAssessments,
   classes,
+  subjects,
 }: AssessmentManagementProps) {
   const [assessments, setAssessments] = useState(() => sortAssessments(initialAssessments));
   const [classId, setClassId] = useState(classes[0]?.id ?? "");
   const [title, setTitle] = useState("");
-  const [subject, setSubject] = useState("");
+  const [subjectId, setSubjectId] = useState(subjects[0]?.id ?? "");
   const [scheduledOn, setScheduledOn] = useState("");
   const [maxPoints, setMaxPoints] = useState("10");
   const [students, setStudents] = useState<StudentResult[]>([]);
@@ -71,37 +75,84 @@ export function AssessmentManagement({
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [editingAssessmentId, setEditingAssessmentId] = useState<string | null>(null);
 
-  async function createAssessment(event: FormEvent<HTMLFormElement>) {
+  function editAssessment(assessment: AssessmentRecord) {
+    setEditingAssessmentId(assessment.id);
+    setClassId(assessment.classId);
+    setTitle(assessment.title);
+    setSubjectId(assessment.subjectId);
+    setScheduledOn(assessment.scheduledOn.slice(0, 10));
+    setMaxPoints(String(assessment.maxPoints));
+    setError("");
+    setMessage("");
+    setIsFormOpen(true);
+  }
+
+  function startNewAssessment() {
+    setEditingAssessmentId(null);
+    setClassId(classes[0]?.id ?? "");
+    setTitle("");
+    setSubjectId(subjects[0]?.id ?? "");
+    setScheduledOn("");
+    setMaxPoints("10");
+    setError("");
+    setMessage("");
+    setIsFormOpen(true);
+  }
+
+  async function saveAssessment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
     setMessage("");
     setSubmitting(true);
     try {
-      const response = await fetch(`${apiUrl}/assessments`, {
-        method: "POST",
+      const response = await fetch(
+        `${apiUrl}/assessments${editingAssessmentId ? `/${editingAssessmentId}` : ""}`,
+        {
+        method: editingAssessmentId ? "PATCH" : "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           classId,
           title,
-          subject,
+          subjectId,
           scheduledOn,
           maxPoints: Number(maxPoints),
         }),
-      });
+        },
+      );
       if (!response.ok) {
-        await showRequestError(response, setError, "Não foi possível cadastrar a avaliação.");
+        await showRequestError(
+          response,
+          setError,
+          editingAssessmentId
+            ? "Não foi possível atualizar a avaliação."
+            : "Não foi possível cadastrar a avaliação.",
+        );
         return;
       }
-      const created = (await response.json()) as AssessmentRecord;
-      setAssessments((current) => sortAssessments([created, ...current]));
-      setTitle("");
-      setSubject("");
-      setScheduledOn("");
+      const saved = (await response.json()) as AssessmentRecord;
+      const wasEditing = Boolean(editingAssessmentId);
+      setAssessments((current) =>
+        sortAssessments([...current.filter((item) => item.id !== saved.id), saved]),
+      );
+      if (selectedAssessment?.id === saved.id) {
+        setSelectedAssessment(saved);
+      }
       setIsFormOpen(false);
-      setMessage("Avaliação cadastrada. Agora você pode lançar os resultados.");
-      await openResults(created);
+      setEditingAssessmentId(null);
+      if (wasEditing) {
+        setMessage("Avaliação atualizada.");
+      } else {
+        setTitle("");
+        setSubjectId(subjects[0]?.id ?? "");
+        setScheduledOn("");
+        setClassId(classes[0]?.id ?? "");
+        setMaxPoints("10");
+        setMessage("Avaliação cadastrada. Agora você pode lançar os resultados.");
+        await openResults(saved);
+      }
     } catch {
       setError("Não foi possível conectar à KlassApp. Verifique se a API está iniciada.");
     } finally {
@@ -177,18 +228,29 @@ export function AssessmentManagement({
     <>
       {isFormOpen && (
         <EntryFormDialog
-          description="Defina a turma, a disciplina e a pontuação máxima. Você escolhe a escala de pontos."
+          description={editingAssessmentId
+            ? "Edite os dados da avaliação. A turma e os resultados registrados são preservados."
+            : "Defina a turma, a matéria e a pontuação máxima. Você escolhe a escala de pontos."}
           eyebrow="ROTINA DE APRENDIZAGEM"
           icon="✎"
           isBusy={submitting}
           onClose={() => setIsFormOpen(false)}
-          title="Cadastre uma avaliação"
+          title={editingAssessmentId ? "Edite a avaliação" : "Cadastre uma avaliação"}
           titleId="create-assessment-title"
         >
-          <form className="assessment-form" onSubmit={createAssessment}>
+          {subjects.length === 0 ? (
+            <p className="subject-required-notice">
+              Nenhuma matéria cadastrada. Peça à administração que cadastre as matérias da escola.
+            </p>
+          ) : <form className="assessment-form" onSubmit={saveAssessment}>
             <label>
               Turma
-              <select onChange={(event) => setClassId(event.target.value)} required value={classId}>
+              <select
+                disabled={Boolean(editingAssessmentId)}
+                onChange={(event) => setClassId(event.target.value)}
+                required
+                value={classId}
+              >
                 {classes.map((schoolClass) => (
                   <option key={schoolClass.id} value={schoolClass.id}>
                     {schoolClass.grade} · Turma {schoolClass.name} · {schoolClass.year}
@@ -207,14 +269,16 @@ export function AssessmentManagement({
               />
             </label>
             <label>
-              Disciplina
-              <input
-                maxLength={80}
-                onChange={(event) => setSubject(event.target.value)}
-                placeholder="Ex.: Ciências"
+              Matéria
+              <select
+                onChange={(event) => setSubjectId(event.target.value)}
                 required
-                value={subject}
-              />
+                value={subjectId}
+              >
+                {subjects.map((subject) => (
+                  <option key={subject.id} value={subject.id}>{subject.name}</option>
+                ))}
+              </select>
             </label>
             <label>
               Data
@@ -239,13 +303,15 @@ export function AssessmentManagement({
             </label>
             <div className="dialog-form-actions">
               <button className="class-submit assessment-submit" disabled={submitting} type="submit">
-                {submitting ? "Salvando..." : "Cadastrar avaliação"}
+                {submitting
+                  ? "Salvando..."
+                  : editingAssessmentId ? "Salvar alterações" : "Cadastrar avaliação"}
               </button>
               <button className="class-cancel-edit" disabled={submitting} onClick={() => setIsFormOpen(false)} type="button">
                 Fechar
               </button>
             </div>
-          </form>
+          </form>}
           {error && <p className="form-message form-error" role="alert">{error}</p>}
         </EntryFormDialog>
       )}
@@ -259,12 +325,8 @@ export function AssessmentManagement({
           <div className="class-list-actions">
             <button
               className="class-submit"
-              disabled={classes.length === 0}
-              onClick={() => {
-                setError("");
-                setMessage("");
-                setIsFormOpen(true);
-              }}
+              disabled={classes.length === 0 || subjects.length === 0}
+              onClick={startNewAssessment}
               type="button"
             >
               Nova avaliação
@@ -274,6 +336,9 @@ export function AssessmentManagement({
         </div>
         {classes.length === 0 && (
           <p className="student-create-hint">Nenhuma turma disponível para criar avaliações.</p>
+        )}
+        {subjects.length === 0 && (
+          <p className="student-create-hint">Cadastre matérias antes de criar avaliações.</p>
         )}
         {error && <p className="form-message form-error" role="alert">{error}</p>}
         {message && <p className="form-message form-success" role="status">{message}</p>}
@@ -293,13 +358,22 @@ export function AssessmentManagement({
                   <small>{assessment.subject} · {assessment.classLabel} · {assessment.year}</small>
                   <small>{formatAssessmentDate(assessment.scheduledOn)} · Máximo: {assessment.maxPoints} pontos</small>
                 </span>
-                <button
-                  className="assessment-open-button"
-                  onClick={() => openResults(assessment)}
-                  type="button"
-                >
-                  Lançar resultados
-                </button>
+                <div className="assessment-list-actions">
+                  <button
+                    className="assessment-open-button"
+                    onClick={() => openResults(assessment)}
+                    type="button"
+                  >
+                    Lançar resultados
+                  </button>
+                  <button
+                    className="assessment-edit-button"
+                    onClick={() => editAssessment(assessment)}
+                    type="button"
+                  >
+                    Editar
+                  </button>
+                </div>
               </li>
             ))}
           </ul>

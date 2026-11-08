@@ -5,6 +5,7 @@ import { DatabaseService } from '../database/database.service.js';
 export interface DashboardSummary {
   students: number;
   classes: number;
+  subjects: number;
   teachers: number | null;
   schedules: number;
   events: number | null;
@@ -17,6 +18,7 @@ export interface DashboardSummary {
 interface DashboardSummaryRow {
   students: number;
   classes: number;
+  subjects: number;
   teachers: number | null;
   schedules: number;
   events: number | null;
@@ -45,6 +47,7 @@ export class DashboardService {
             AND student_enrollments.student_id = students.id
             AND student_enrollments.status = 'active'
            WHERE students.school_id = $1
+            AND students.is_active = true
              AND ($3::text = 'admin' OR EXISTS (
                SELECT 1 FROM teacher_class_assignments
                WHERE teacher_class_assignments.school_id = student_enrollments.school_id
@@ -62,6 +65,10 @@ export class DashboardService {
                  AND teacher_class_assignments.user_id = $2
              ))
          ) AS classes,
+         (
+           SELECT count(*)::integer FROM school_subjects
+           WHERE school_subjects.school_id = $1
+         ) AS subjects,
          CASE WHEN $3::text = 'admin' THEN (
            SELECT (
              SELECT count(*) FROM school_memberships
@@ -87,6 +94,7 @@ export class DashboardService {
          CASE WHEN $3::text = 'admin' THEN (
            SELECT count(*)::integer FROM school_events
            WHERE school_events.school_id = $1
+             AND school_events.status <> 'draft'
          ) ELSE NULL END AS events,
          (
            SELECT count(*)::integer FROM assessments
@@ -116,6 +124,7 @@ export class DashboardService {
             AND student_enrollments.student_id = students.id
             AND student_enrollments.status = 'active'
            WHERE students.school_id = $1
+             AND students.is_active = true
              AND NOT EXISTS (
                SELECT 1 FROM student_responsibles
                WHERE student_responsibles.school_id = students.school_id
@@ -142,6 +151,7 @@ export class DashboardService {
     return {
       students: row.students,
       classes: row.classes,
+      subjects: row.subjects,
       teachers: row.teachers,
       schedules: row.schedules,
       events: row.events,
