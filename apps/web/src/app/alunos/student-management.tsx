@@ -8,6 +8,7 @@ import { PersonProfile } from "../person-profile";
 import { PersonPhotoAvatar } from "../person-photo";
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+const studentsPerPage = 25;
 
 function normalizeSearch(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
@@ -51,6 +52,7 @@ export function StudentManagement({
 }: StudentManagementProps) {
   const [students, setStudents] = useState(initialStudents);
   const [search, setSearch] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
   const [selectedClassId, setSelectedClassId] = useState("");
   const [fullName, setFullName] = useState("");
   const [responsibles, setResponsibles] = useState([emptyResponsible()]);
@@ -79,6 +81,9 @@ export function StudentManagement({
     return text.includes(searchTerm) ||
       (phoneSearch.length > 0 && phoneDigits.includes(phoneSearch));
   });
+  const totalPages = Math.ceil(filteredStudents.length / studentsPerPage);
+  const pageStart = (currentPage - 1) * studentsPerPage;
+  const pageStudents = filteredStudents.slice(pageStart, pageStart + studentsPerPage);
 
   function updateResponsible(
     index: number,
@@ -172,35 +177,6 @@ export function StudentManagement({
 
   return (
     <>
-      <section className="class-panel student-create-panel" aria-labelledby="student-create-heading">
-        <div className="student-create-copy">
-          <div className="setup-icon" aria-hidden="true">♧</div>
-          <div>
-            <p className="card-kicker">MATRÍCULAS ATIVAS</p>
-            <h2 id="student-create-heading">Novo aluno</h2>
-            <p>Cadastre um aluno e adicione seus contatos responsáveis.</p>
-          </div>
-        </div>
-        <button
-          className="class-submit student-create-button"
-          disabled={classes.length === 0}
-          onClick={() => {
-            setError("");
-            setSuccess("");
-            setIsFormOpen(true);
-          }}
-          type="button"
-        >
-          + Novo aluno
-        </button>
-        {classes.length === 0 && (
-          <p className="student-create-hint">
-            Cadastre uma turma antes de registrar alunos. <Link href="/turmas">Ir para Turmas</Link>
-          </p>
-        )}
-        {success && <p className="form-message form-success" role="status">{success}</p>}
-      </section>
-
       {isFormOpen && (
         <div
           className="profile-backdrop"
@@ -369,17 +345,49 @@ export function StudentManagement({
             <p className="card-kicker">MATRÍCULAS ATIVAS</p>
             <h2 id="students-title">Alunos da escola</h2>
           </div>
-          <span className="class-count">{students.length}</span>
+          <div className="class-list-actions">
+            <button
+              className="class-submit"
+              disabled={classes.length === 0}
+              onClick={() => {
+                setError("");
+                setSuccess("");
+                setIsFormOpen(true);
+              }}
+              type="button"
+            >
+              Novo aluno
+            </button>
+            <span className="class-count">{students.length}</span>
+          </div>
         </div>
-        <label className="people-search">
-          <span>Buscar aluno</span>
-          <input
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Nome, turma, responsável ou telefone"
-            type="search"
-            value={search}
-          />
-        </label>
+        {classes.length === 0 && (
+          <p className="student-create-hint">
+            Cadastre uma turma antes de registrar alunos. <Link href="/turmas">Ir para Turmas</Link>
+          </p>
+        )}
+        {success && <p className="form-message form-success" role="status">{success}</p>}
+        <div className="student-table-tools">
+          <label className="people-search">
+            <span>Buscar aluno</span>
+            <input
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setCurrentPage(1);
+              }}
+              placeholder="Nome, turma, responsável ou telefone"
+              type="search"
+              value={search}
+            />
+          </label>
+          {students.length > 0 && (
+            <p className="student-results-count" aria-live="polite">
+              {filteredStudents.length === 0
+                ? "Nenhum aluno encontrado"
+                : `Mostrando ${pageStart + 1}–${Math.min(pageStart + studentsPerPage, filteredStudents.length)} de ${filteredStudents.length} alunos`}
+            </p>
+          )}
+        </div>
 
         {students.length === 0 ? (
           <div className="empty-classes">
@@ -393,41 +401,82 @@ export function StudentManagement({
             <p>Tente buscar por outro nome, turma, responsável ou telefone.</p>
           </div>
         ) : (
-          <ul className="class-list people-card-grid">
-            {filteredStudents.map((student) => (
-              <li className="student-list-item" key={student.id}>
+          <>
+            <div className="student-table-scroll" tabIndex={0} aria-label="Tabela de alunos; use a rolagem horizontal para ver todas as colunas">
+              <table className="student-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Aluno</th>
+                    <th scope="col">Turma</th>
+                    <th scope="col">Responsável</th>
+                    <th scope="col">Situação</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageStudents.map((student) => (
+                    <tr key={student.id}>
+                      <td>
+                        <div className="student-table-person">
+                          <PersonPhotoAvatar
+                            hasPhoto={student.hasPhoto}
+                            kind="students"
+                            personId={student.id}
+                            personName={student.fullName}
+                          />
+                          <button
+                            className="student-name-button"
+                            onClick={() => setProfileStudent({ id: student.id, fullName: student.fullName })}
+                            type="button"
+                          >
+                            {student.fullName}
+                          </button>
+                        </div>
+                      </td>
+                      <td>
+                        <span className="student-table-class">
+                          {student.grade} · Turma {student.className}
+                        </span>
+                        <small className="student-table-year">{student.academicYear}</small>
+                      </td>
+                      <td>
+                        {student.responsibles[0] ? (
+                          <span className="student-table-contact">
+                            <span>{student.responsibles[0].fullName}</span>
+                            <small>{student.responsibles[0].phone}</small>
+                            {student.responsibles.length > 1 && (
+                              <small>+ {student.responsibles.length - 1} responsáveis</small>
+                            )}
+                          </span>
+                        ) : (
+                          <span className="student-table-muted">Não informado</span>
+                        )}
+                      </td>
+                      <td><span className="student-enrollment-status">Matrícula ativa</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {totalPages > 1 && (
+              <nav className="student-pagination" aria-label="Paginação de alunos">
                 <button
-                  className="person-list-button person-card-button"
-                  onClick={() => setProfileStudent({ id: student.id, fullName: student.fullName })}
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage((page) => page - 1)}
                   type="button"
                 >
-                  <PersonPhotoAvatar
-                    hasPhoto={student.hasPhoto}
-                    kind="students"
-                    personId={student.id}
-                    personName={student.fullName}
-                  />
-                  <span className="class-list-copy student-list-copy">
-                    <strong>{student.fullName}</strong>
-                    <small>
-                      {student.grade} · Turma {student.className} · {student.academicYear}
-                    </small>
-                    <span className="student-responsible-list">
-                      {student.responsibles[0] && (
-                        <span>
-                          {student.responsibles[0].fullName} · {student.responsibles[0].phone}
-                        </span>
-                      )}
-                      {student.responsibles.length > 1 && (
-                        <span>+ {student.responsibles.length - 1} responsáveis</span>
-                      )}
-                    </span>
-                  </span>
-                  <span className="teacher-status">MATRÍCULA ATIVA</span>
+                  Anterior
                 </button>
-              </li>
-            ))}
-          </ul>
+                <span aria-live="polite">Página {currentPage} de {totalPages}</span>
+                <button
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage((page) => page + 1)}
+                  type="button"
+                >
+                  Próxima
+                </button>
+              </nav>
+            )}
+          </>
         )}
       </section>
       {profileStudent && (

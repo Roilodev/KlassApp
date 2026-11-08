@@ -29,6 +29,7 @@ export function ClassForm({ initialClasses }: ClassFormProps) {
   const [submitting, setSubmitting] = useState(false);
   const [editingClassId, setEditingClassId] = useState<string | null>(null);
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const selectedClass = classes.find((schoolClass) => schoolClass.id === selectedClassId);
   const classesByGrade = new Map<string, SchoolClass[]>();
   for (const schoolClass of classes) {
@@ -63,6 +64,19 @@ export function ClassForm({ initialClasses }: ClassFormProps) {
   function closeClassDetails() {
     setSelectedClassId(null);
     setEditingClassId(null);
+  }
+
+  function openCreateDialog() {
+    resetForm();
+    setError("");
+    setSuccess("");
+    setCreateDialogOpen(true);
+  }
+
+  function closeCreateDialog() {
+    setCreateDialogOpen(false);
+    resetForm();
+    setError("");
   }
 
   async function saveClass(event: FormEvent<HTMLFormElement>) {
@@ -113,6 +127,9 @@ export function ClassForm({ initialClasses }: ClassFormProps) {
       const wasEditing = Boolean(editingClassId);
       resetForm();
       setSuccess(wasEditing ? "Turma atualizada com sucesso." : "Turma cadastrada com sucesso.");
+      if (!wasEditing) {
+        setCreateDialogOpen(false);
+      }
     } catch {
       setError("Não foi possível conectar à KlassApp. Verifique se a API está iniciada.");
     } finally {
@@ -122,58 +139,65 @@ export function ClassForm({ initialClasses }: ClassFormProps) {
 
   return (
     <>
-      <section className="class-panel" aria-labelledby="create-class-title">
-        <div className="class-panel-heading">
-          <div className="setup-icon" aria-hidden="true">✎</div>
-          <div>
-            <p className="card-kicker">ORGANIZAÇÃO ESCOLAR</p>
-            <h2 id="create-class-title">Cadastre uma turma</h2>
-            <p>Exemplo: ano escolar 4º ano, turma A.</p>
-          </div>
-        </div>
-
-        <form className="class-form" onSubmit={saveClass}>
-          <label>
-            Ano letivo
-            <input
-              max="2200"
-              min="2000"
-              onChange={(event) => setYear(event.target.value)}
-              required
-              type="number"
-              value={year}
-            />
-          </label>
-          <label>
-            Ano escolar
-            <input
-              maxLength={80}
-              onChange={(event) => setGrade(event.target.value)}
-              placeholder="Ex.: 4º ano"
-              required
-              value={grade}
-            />
-          </label>
-          <label>
-            Turma
-            <input
-              maxLength={40}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="Ex.: A"
-              required
-              value={name}
-            />
-          </label>
-          <div className="class-form-actions">
-            <button className="class-submit" disabled={submitting} type="submit">
-              {submitting ? "Salvando..." : "Cadastrar turma"}
-            </button>
-          </div>
-        </form>
-
-        {error && <p className="form-message form-error" role="alert">{error}</p>}
-        {success && <p className="form-message form-success" role="status">{success}</p>}
-      </section>
+      {createDialogOpen && (
+        <EntryFormDialog
+          description="Informe o ano letivo, o ano escolar e a identificação da turma."
+          eyebrow="ORGANIZAÇÃO ESCOLAR"
+          icon="✎"
+          isBusy={submitting}
+          onClose={closeCreateDialog}
+          title="Cadastrar turma"
+          titleId="create-class-title"
+        >
+          <form className="class-form class-create-dialog-form" onSubmit={saveClass}>
+            <label>
+              Ano letivo
+              <input
+                max="2200"
+                min="2000"
+                onChange={(event) => setYear(event.target.value)}
+                required
+                type="number"
+                value={year}
+              />
+            </label>
+            <label>
+              Ano escolar
+              <input
+                maxLength={80}
+                onChange={(event) => setGrade(event.target.value)}
+                placeholder="Ex.: 4º ano"
+                required
+                value={grade}
+              />
+            </label>
+            <label>
+              Turma
+              <input
+                maxLength={40}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Ex.: A"
+                required
+                value={name}
+              />
+            </label>
+            <div className="class-form-actions">
+              <button className="class-submit" disabled={submitting} type="submit">
+                {submitting ? "Salvando..." : "Cadastrar turma"}
+              </button>
+              <button
+                className="class-cancel-edit"
+                disabled={submitting}
+                onClick={closeCreateDialog}
+                type="button"
+              >
+                Cancelar
+              </button>
+            </div>
+            {error && <p className="form-message form-error" role="alert">{error}</p>}
+          </form>
+        </EntryFormDialog>
+      )}
 
       {selectedClass && !editingClassId && (
         <EntryFormDialog
@@ -318,8 +342,15 @@ export function ClassForm({ initialClasses }: ClassFormProps) {
             <p className="card-kicker">TURMAS CADASTRADAS</p>
             <h2 id="classes-title">Sua escola, organizada</h2>
           </div>
-          <span className="class-count">{classes.length}</span>
+          <div className="class-list-actions">
+            <button className="class-submit" onClick={openCreateDialog} type="button">
+              Cadastrar turma
+            </button>
+            <span className="class-count">{classes.length}</span>
+          </div>
         </div>
+
+        {success && <p className="form-message form-success" role="status">{success}</p>}
 
         {classes.length === 0 ? (
           <div className="empty-classes">

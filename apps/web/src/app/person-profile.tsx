@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PersonPhoto } from "./person-photo";
 import type { SchoolClass } from "./turmas/class-form";
 
@@ -11,6 +10,7 @@ interface StudentProfileData {
   student: {
     id: string;
     fullName: string;
+    schoolName: string;
     createdAt: string;
     photoAuthorizationDate: string | null;
     photoAuthorizedBy: string | null;
@@ -77,6 +77,7 @@ interface TeacherProfileData {
     displayName: string;
     email: string;
     phone: string | null;
+    schoolName: string;
     createdAt: string;
     isActive: boolean;
   };
@@ -155,33 +156,6 @@ function formatDateTime(value: string) {
   });
 }
 
-function behaviorCategoryLabel(value: string) {
-  const labels: Record<string, string> = {
-    participation: "Participação",
-    collaboration: "Colaboração e convivência",
-    responsibility: "Responsabilidade",
-    learning: "Envolvimento na aprendizagem",
-    positive: "Destaque positivo",
-    other: "Outro fato observado",
-  };
-  return labels[value] ?? value;
-}
-
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className="profile-section">
-      <h3>{title}</h3>
-      {children}
-    </section>
-  );
-}
-
 export function PersonProfile({
   kind,
   personId,
@@ -199,12 +173,20 @@ export function PersonProfile({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [saveSuccess, setSaveSuccess] = useState("");
+  const [responsibleSaveError, setResponsibleSaveError] = useState<{ index: number; message: string } | null>(null);
+  const [responsibleSavingIndex, setResponsibleSavingIndex] = useState<number | null>(null);
   const [studentName, setStudentName] = useState("");
   const [responsibles, setResponsibles] = useState<ResponsibleDraft[]>([]);
+  const [collapsedResponsibleIds, setCollapsedResponsibleIds] = useState<string[]>([]);
   const [teacherName, setTeacherName] = useState("");
   const [teacherEmail, setTeacherEmail] = useState("");
   const [teacherPhone, setTeacherPhone] = useState("");
   const [teacherClassIds, setTeacherClassIds] = useState<string[]>([]);
+  const newResponsibleNameRef = useRef<HTMLInputElement>(null);
+  const [photoActionsTarget, setPhotoActionsTarget] = useState<HTMLDivElement | null>(null);
+  const setPhotoActionsContainer = useCallback((element: HTMLDivElement | null) => {
+    setPhotoActionsTarget(element);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -247,6 +229,7 @@ export function PersonProfile({
     if (studentProfile) {
       setStudentName(studentProfile.student.fullName);
       setResponsibles(studentProfile.responsibles.map((responsible) => ({ ...responsible })));
+      setCollapsedResponsibleIds([]);
     } else if (teacherProfile) {
       setTeacherName(teacherProfile.teacher.displayName);
       setTeacherEmail(teacherProfile.teacher.email);
@@ -259,15 +242,37 @@ export function PersonProfile({
   }
 
   function updateResponsible(index: number, patch: Partial<ResponsibleDraft>) {
+    setSaveError("");
+    setResponsibleSaveError((current) => current?.index === index ? null : current);
     setResponsibles((current) => current.map((responsible, currentIndex) =>
       currentIndex === index ? { ...responsible, ...patch } : responsible,
     ));
   }
 
-  async function saveProfile(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function addResponsible() {
+    if (responsibles.length >= 5) return;
+    setSaveError("");
+    setResponsibles((current) => [
+      ...current,
+      { fullName: "", phone: "", relationship: "", notificationAuthorized: false },
+    ]);
+    requestAnimationFrame(() => {
+      newResponsibleNameRef.current?.focus();
+      newResponsibleNameRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  }
+
+  async function saveProfile(keepEditing = false, responsibleIndex?: number) {
+    const responsiblesToSave = responsibleIndex === undefined
+      ? responsibles
+      : responsibles.filter((responsible, index) => responsible.id || index === responsibleIndex);
+    const unsavedResponsibles = responsibleIndex === undefined
+      ? []
+      : responsibles.filter((responsible, index) => !responsible.id && index !== responsibleIndex);
     setSaveError("");
     setSaveSuccess("");
+    setResponsibleSaveError(null);
+    setResponsibleSavingIndex(keepEditing ? responsibleIndex ?? null : null);
     setSaving(true);
     try {
       const response = await fetch(`${apiUrl}/${kind}/${personId}/profile`, {
@@ -275,7 +280,7 @@ export function PersonProfile({
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(isStudent
-          ? { fullName: studentName, responsibles }
+          ? { fullName: studentName, responsibles: responsiblesToSave }
           : {
               displayName: teacherName,
               email: teacherEmail,
@@ -284,12 +289,26 @@ export function PersonProfile({
             }),
       });
       if (!response.ok) {
-        const result = await response.json().catch(() => null);
-        setSaveError(
-          typeof result?.message === "string"
-            ? result.message
-            : "Não foi possível salvar as alterações do perfil.",
-        );
+        const responseBody = await response.text();
+        let serverMessage: string | null = null;
+        try {
+          const result: { message?: unknown } = JSON.parse(responseBody);
+          if (typeof result.message === "string") {
+            serverMessage = result.message;
+          } else if (Array.isArray(result.message)) {
+            serverMessage = result.message.filter(
+              (message): message is string => typeof message === "string",
+            ).join(" ");
+          }
+        } catch {
+          serverMessage = null;
+        }
+        const message = serverMessage ||
+          `Não foi possível salvar as alterações (HTTP ${response.status}).`;
+        setSaveError(message);
+        if (responsibleIndex !== undefined) {
+          setResponsibleSaveError({ index: responsibleIndex, message });
+        }
         return;
       }
 
@@ -302,6 +321,14 @@ export function PersonProfile({
         responsibles?: StudentProfileData["responsibles"];
         classes?: SchoolClass[];
       };
+      if (isStudent && !updated.responsibles) {
+        const message = "A API não retornou os responsáveis salvos. Atualize o perfil antes de continuar.";
+        setSaveError(message);
+        if (responsibleIndex !== undefined) {
+          setResponsibleSaveError({ index: responsibleIndex, message });
+        }
+        return;
+      }
       setProfile((current) => {
         if (isStudent && current && "student" in current && updated.fullName && updated.responsibles) {
           return {
@@ -325,13 +352,36 @@ export function PersonProfile({
         }
         return current;
       });
+      if (isStudent && updated.responsibles) {
+        setResponsibleSaveError(null);
+        const newlySavedIds = updated.responsibles.flatMap((responsible, index) =>
+          responsiblesToSave[index]?.id ? [] : [responsible.id],
+        );
+        setResponsibles([
+          ...updated.responsibles.map((responsible) => ({ ...responsible })),
+          ...unsavedResponsibles,
+        ]);
+        if (keepEditing) {
+          setCollapsedResponsibleIds((current) => [...new Set([...current, ...newlySavedIds])]);
+        }
+      }
       onProfileUpdated?.(updated);
-      setIsEditing(false);
-      setSaveSuccess("Perfil atualizado com sucesso.");
-    } catch {
-      setSaveError("Não foi possível conectar à KlassApp. Verifique se a API está iniciada.");
+      if (!keepEditing) setIsEditing(false);
+      setSaveSuccess(keepEditing
+        ? "Responsável salvo com sucesso."
+        : "Perfil atualizado com sucesso.");
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error
+          ? `Falha ao salvar: ${requestError.message}`
+          : "Falha inesperada ao salvar. Tente novamente.";
+      setSaveError(message);
+      if (responsibleIndex !== undefined) {
+        setResponsibleSaveError({ index: responsibleIndex, message });
+      }
     } finally {
       setSaving(false);
+      setResponsibleSavingIndex(null);
     }
   }
 
@@ -340,7 +390,7 @@ export function PersonProfile({
       if (event.target === event.currentTarget && !saving) onClose();
     }}>
       <section
-        aria-labelledby="person-profile-title"
+        aria-labelledby={(studentProfile || teacherProfile) && !isEditing ? "person-ficha-title" : "person-profile-title"}
         aria-modal="true"
         className="person-profile-dialog"
         onKeyDown={(event) => {
@@ -352,32 +402,259 @@ export function PersonProfile({
         role="dialog"
         tabIndex={-1}
       >
-        <div className="person-profile-heading">
-          <PersonPhoto
-            editable={canEditPhoto}
-            kind={kind}
-            personId={personId}
-            personName={profileName}
-          />
-          <div className="person-profile-copy">
-            <p className="card-kicker">{isStudent ? "PERFIL DO ALUNO" : "PERFIL DO PROFESSOR"}</p>
-            <h2 id="person-profile-title">{profileName}</h2>
-            {teacherProfile && <p>{teacherProfile.teacher.email}</p>}
-            {teacherProfile && <p>{teacherProfile.teacher.phone ?? "Telefone não informado"}</p>}
-            {teacherProfile && (
-              <p className={teacherProfile.teacher.isActive ? "profile-active-status" : "profile-inactive-status"}>
-                {teacherProfile.teacher.isActive ? "Perfil ativo" : "Perfil inativo"}
-              </p>
-            )}
-          </div>
-          {canEditProfile && !loading && !error && !isEditing && (
-            <div className="profile-heading-actions">
-              <button className="profile-edit-button" onClick={beginEditing} type="button">
-                Editar perfil
-              </button>
+        {studentProfile && !isEditing && (
+          <section className="student-ficha-sheet" aria-labelledby="person-ficha-title">
+            <header className="student-ficha-header">
+              <span className="student-ficha-mark" aria-hidden="true">✿</span>
+              <div className="student-ficha-heading-copy">
+                <p>{studentProfile.student.schoolName}</p>
+                <h1 id="person-ficha-title">Ficha do estudante</h1>
+                <span>Dados escolares e contatos da família</span>
+              </div>
+            </header>
+            <div className="student-ficha-content">
+              <div className="student-ficha-identity">
+                <div className="student-ficha-photo">
+                  <PersonPhoto
+                    actionsTarget={photoActionsTarget}
+                    editable={canEditPhoto}
+                    kind="students"
+                    personId={personId}
+                    personName={studentProfile.student.fullName}
+                  />
+                </div>
+                <div className="student-ficha-name">
+                  <p className="card-kicker">ESTUDANTE</p>
+                  <h2>{studentProfile.student.fullName}</h2>
+                  <p>Cadastro em {formatDateTime(studentProfile.student.createdAt)}</p>
+                </div>
+              </div>
+
+              <section className="student-ficha-section">
+                <h2><span aria-hidden="true">▦</span> Dados escolares</h2>
+                {studentProfile.enrollments.filter((enrollment) => enrollment.status === "active").length > 0 ? (
+                  <ul>
+                    {studentProfile.enrollments
+                      .filter((enrollment) => enrollment.status === "active")
+                      .map((enrollment, index) => (
+                        <li key={`${enrollment.year}-${enrollment.className}-${index}`}>
+                          <strong>{enrollment.grade} · Turma {enrollment.className}</strong>
+                          <span>Ano letivo {enrollment.year}</span>
+                          {enrollment.teachers.length > 0 && (
+                            <span>Professor(a): {enrollment.teachers.join(", ")}</span>
+                          )}
+                        </li>
+                      ))}
+                  </ul>
+                ) : (
+                  <p>Não há matrícula ativa no momento.</p>
+                )}
+              </section>
+
+              <section className="student-ficha-section student-ficha-family">
+                <h2><span aria-hidden="true">♡</span> Dados familiares</h2>
+                {studentProfile.responsiblesRestricted ? (
+                  <p>Os contatos dos responsáveis estão disponíveis para a administração.</p>
+                ) : studentProfile.responsibles.length > 0 ? (
+                  <ul>
+                    {studentProfile.responsibles.map((responsible) => (
+                      <li key={responsible.id}>
+                        <strong>{responsible.fullName}</strong>
+                        <span>{responsible.relationship}</span>
+                        <span>{responsible.phone}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>Nenhum responsável cadastrado.</p>
+                )}
+              </section>
             </div>
-          )}
-        </div>
+            <footer className="student-ficha-footer">
+              <span>Uma comunidade que aprende e cresce junta</span>
+              <span aria-hidden="true">✦</span>
+            </footer>
+          </section>
+        )}
+        {teacherProfile && !isEditing && (
+          <section className="student-ficha-sheet teacher-ficha-sheet" aria-labelledby="person-ficha-title">
+            <header className="student-ficha-header">
+              <span className="student-ficha-mark" aria-hidden="true">✦</span>
+              <div className="student-ficha-heading-copy">
+                <p>{teacherProfile.teacher.schoolName}</p>
+                <h1 id="person-ficha-title">Ficha do professor</h1>
+                <span>Dados profissionais e atuação escolar</span>
+              </div>
+            </header>
+            <div className="student-ficha-content">
+              <div className="student-ficha-identity">
+                <div className="student-ficha-photo">
+                  <PersonPhoto
+                    actionsTarget={photoActionsTarget}
+                    editable={canEditPhoto}
+                    kind="teachers"
+                    personId={personId}
+                    personName={teacherProfile.teacher.displayName}
+                  />
+                </div>
+                <div className="student-ficha-name">
+                  <p className="card-kicker">PROFESSOR(A)</p>
+                  <h2>{teacherProfile.teacher.displayName}</h2>
+                  <p className={teacherProfile.teacher.isActive ? "profile-active-status" : "profile-inactive-status"}>
+                    {teacherProfile.teacher.isActive ? "Perfil ativo" : "Perfil inativo"}
+                  </p>
+                </div>
+              </div>
+
+              <section className="student-ficha-section">
+                <h2><span aria-hidden="true">@</span> Dados profissionais</h2>
+                <ul>
+                  <li>
+                    <strong>Email</strong>
+                    <span>{teacherProfile.teacher.email}</span>
+                  </li>
+                  <li>
+                    <strong>Telefone de contato</strong>
+                    <span>{teacherProfile.teacher.phone ?? "Não informado"}</span>
+                  </li>
+                  <li>
+                    <strong>Cadastro</strong>
+                    <span>{formatDateTime(teacherProfile.teacher.createdAt)}</span>
+                  </li>
+                </ul>
+              </section>
+
+              <section className="student-ficha-section">
+                <h2><span aria-hidden="true">▦</span> Turmas atribuídas</h2>
+                {teacherProfile.classes.length === 0 ? <p>Nenhuma turma atribuída.</p> : (
+                  <ul>
+                    {teacherProfile.classes.map((schoolClass, index) => (
+                      <li key={`${schoolClass.year}-${schoolClass.name}-${index}`}>
+                        <strong>{schoolClass.grade} · Turma {schoolClass.name}</strong>
+                        <span>Ano letivo {schoolClass.year}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
+              <section className="student-ficha-section">
+                <h2><span aria-hidden="true">◷</span> Horários de aula</h2>
+                {teacherProfile.schedules.length === 0 ? <p>Nenhum horário associado.</p> : (
+                  <ul>
+                    {teacherProfile.schedules.map((schedule, index) => (
+                      <li key={`${schedule.year}-${schedule.dayOfWeek}-${schedule.startsAt}-${index}`}>
+                        <strong>{schedule.grade} · Turma {schedule.className} · {schedule.year}</strong>
+                        <span>
+                          {weekdays[schedule.dayOfWeek]} · {schedule.startsAt.slice(0, 5)}–
+                          {schedule.endsAt.slice(0, 5)} · {schedule.subject}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
+              <section className="student-ficha-section">
+                <h2><span aria-hidden="true">✎</span> Avaliações e alunos</h2>
+                <p>
+                  {teacherProfile.studentsCount} {teacherProfile.studentsCount === 1 ? "aluno sob responsabilidade" : "alunos sob responsabilidade"}
+                </p>
+                {teacherProfile.assessments.length === 0 ? <p>Nenhuma avaliação criada.</p> : (
+                  <ul>
+                    {teacherProfile.assessments.map((assessment) => (
+                      <li key={assessment.id}>
+                        <strong>{assessment.title} · {assessment.subject}</strong>
+                        <span>{assessment.classLabel} · {assessment.year} · {formatDate(assessment.scheduledOn)}</span>
+                        <span>Máximo: {assessment.maxPoints} pontos · {assessment.resultsRecorded} resultados lançados</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
+              <section className="student-ficha-section">
+                <h2><span aria-hidden="true">◇</span> Eventos escolares</h2>
+                {teacherProfile.events.length === 0 ? <p>Nenhum evento criado.</p> : (
+                  <ul>
+                    {teacherProfile.events.map((schoolEvent) => (
+                      <li key={schoolEvent.id}>
+                        <strong>{schoolEvent.title} · {schoolEvent.status === "published" ? "Publicado" : "Cancelado"}</strong>
+                        <span>{schoolEvent.audience} · {formatDateTime(schoolEvent.startsAt)}</span>
+                        {schoolEvent.location && <span>{schoolEvent.location}</span>}
+                        {schoolEvent.description && <span>{schoolEvent.description}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            </div>
+            <footer className="student-ficha-footer">
+              <span>Uma comunidade que aprende e cresce junta</span>
+              <span aria-hidden="true">✦</span>
+            </footer>
+          </section>
+        )}
+        {(!(studentProfile || teacherProfile) || isEditing) && (
+          <div className="person-profile-heading">
+            <PersonPhoto
+              editable={canEditPhoto}
+              kind={kind}
+              personId={personId}
+              personName={profileName}
+            />
+            <div className="person-profile-copy">
+              <div className="profile-title-row">
+                <p className="card-kicker">{isStudent ? "PERFIL DO ALUNO" : "PERFIL DO PROFESSOR"}</p>
+                {canEditProfile && !loading && !error && !isEditing && (
+                  <button
+                    aria-label={`Editar perfil de ${profileName}`}
+                    className="profile-edit-icon"
+                    onClick={beginEditing}
+                    title="Editar perfil"
+                    type="button"
+                  >
+                    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                      <path d="m14 5 5 5M4 20l4.2-.8L19 8.4a2.1 2.1 0 0 0-3-3L5.2 16.2 4 20Z" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+              <h2 id="person-profile-title">{profileName}</h2>
+              {studentProfile && (
+                <div className="profile-header-responsibles" aria-label="Responsáveis">
+                  <p className="profile-header-label">RESPONSÁVEIS</p>
+                  {studentProfile.responsiblesRestricted ? (
+                    <p className="profile-header-note">Os contatos dos responsáveis são restritos à administração.</p>
+                  ) : studentProfile.responsibles.length === 0 ? (
+                    <p className="profile-header-note">Nenhum responsável cadastrado.</p>
+                  ) : (
+                    <ul>
+                      {studentProfile.responsibles.map((responsible) => (
+                        <li key={responsible.id}>
+                          <strong>{responsible.fullName}</strong>
+                          <span>{responsible.relationship} · {responsible.phone}</span>
+                          <small>
+                            {responsible.notificationAuthorized
+                              ? "Autorizado para notificações"
+                              : "Sem autorização de notificações"}
+                          </small>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+              {teacherProfile && <p>{teacherProfile.teacher.email}</p>}
+              {teacherProfile && <p>{teacherProfile.teacher.phone ?? "Telefone não informado"}</p>}
+              {teacherProfile && (
+                <p className={teacherProfile.teacher.isActive ? "profile-active-status" : "profile-inactive-status"}>
+                  {teacherProfile.teacher.isActive ? "Perfil ativo" : "Perfil inativo"}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         {saveSuccess && <p className="form-message form-success" role="status">{saveSuccess}</p>}
         {loading ? (
@@ -385,7 +662,18 @@ export function PersonProfile({
         ) : error ? (
           <p className="form-message form-error" role="alert">{error}</p>
         ) : isEditing ? (
-          <form className="profile-edit-form" onSubmit={saveProfile}>
+          <form
+            className="profile-edit-form"
+            onInvalid={() => {
+              if (isStudent) {
+                setSaveError("Preencha todos os campos obrigatórios do aluno e dos responsáveis.");
+              }
+            }}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveProfile();
+            }}
+          >
             {saveError && <p className="form-message form-error" role="alert">{saveError}</p>}
             {isStudent ? (
               <>
@@ -394,7 +682,10 @@ export function PersonProfile({
                   <input
                     autoComplete="off"
                     maxLength={160}
-                    onChange={(event) => setStudentName(event.target.value)}
+                    onChange={(event) => {
+                      setStudentName(event.target.value);
+                      setSaveError("");
+                    }}
                     required
                     value={studentName}
                   />
@@ -404,57 +695,104 @@ export function PersonProfile({
                   {responsibles.map((responsible, index) => (
                     <fieldset className="profile-responsible-fields" key={responsible.id ?? `new-${index}`}>
                       <legend>Responsável {index + 1}</legend>
-                      <label>
-                        Nome completo
-                        <input
-                          autoComplete="off"
-                          maxLength={160}
-                          onChange={(event) => updateResponsible(index, { fullName: event.target.value })}
-                          required
-                          value={responsible.fullName}
-                        />
-                      </label>
-                      <label>
-                        Telefone com DDD
-                        <input
-                          autoComplete="tel"
-                          onChange={(event) => updateResponsible(index, {
-                            phone: event.target.value,
-                            notificationAuthorized: event.target.value === responsible.phone
-                              ? responsible.notificationAuthorized
-                              : false,
-                          })}
-                          required
-                          type="tel"
-                          value={responsible.phone}
-                        />
-                      </label>
-                      <label>
-                        Parentesco ou vínculo
-                        <input
-                          autoComplete="off"
-                          maxLength={80}
-                          onChange={(event) => updateResponsible(index, { relationship: event.target.value })}
-                          required
-                          value={responsible.relationship}
-                        />
-                      </label>
-                      <label className="profile-authorization-option">
-                        <input
-                          checked={responsible.notificationAuthorized}
-                          onChange={(event) => updateResponsible(index, {
-                            notificationAuthorized: event.target.checked,
-                          })}
-                          type="checkbox"
-                        />
-                        Autorização documentada para notificações neste telefone
-                      </label>
+                      {responsible.id && collapsedResponsibleIds.includes(responsible.id) ? (
+                        <div className="profile-responsible-summary">
+                          <div>
+                            <strong>{responsible.fullName}</strong>
+                            <span>{responsible.relationship} · {responsible.phone}</span>
+                          </div>
+                          <button
+                            className="profile-responsible-edit"
+                            onClick={() => setCollapsedResponsibleIds((current) =>
+                              current.filter((id) => id !== responsible.id),
+                            )}
+                            type="button"
+                          >
+                            Editar responsável
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <label>
+                            Nome completo
+                            <input
+                              autoComplete="off"
+                              maxLength={160}
+                              onChange={(event) => updateResponsible(index, { fullName: event.target.value })}
+                              ref={
+                                !responsible.id && index === responsibles.length - 1
+                                  ? newResponsibleNameRef
+                                  : undefined
+                              }
+                              required
+                              value={responsible.fullName}
+                            />
+                          </label>
+                          <label>
+                            Telefone com DDD
+                            <input
+                              autoComplete="tel"
+                              onChange={(event) => updateResponsible(index, {
+                                phone: event.target.value,
+                                notificationAuthorized: event.target.value === responsible.phone
+                                  ? responsible.notificationAuthorized
+                                  : false,
+                              })}
+                              required
+                              type="tel"
+                              value={responsible.phone}
+                            />
+                          </label>
+                          <label>
+                            Parentesco ou vínculo
+                            <input
+                              autoComplete="off"
+                              maxLength={80}
+                              onChange={(event) => updateResponsible(index, { relationship: event.target.value })}
+                              required
+                              value={responsible.relationship}
+                            />
+                          </label>
+                          <label className="profile-authorization-option">
+                            <input
+                              checked={responsible.notificationAuthorized}
+                              onChange={(event) => updateResponsible(index, {
+                                notificationAuthorized: event.target.checked,
+                              })}
+                              type="checkbox"
+                            />
+                            Autorização documentada para notificações neste telefone
+                          </label>
+                          {!responsible.id && (
+                            <button
+                              className="class-submit profile-responsible-save"
+                              disabled={saving}
+                              onClick={() => void saveProfile(true, index)}
+                              type="button"
+                            >
+                              {responsibleSavingIndex === index ? "Salvando..." : "Salvar responsável"}
+                            </button>
+                          )}
+                          {responsibleSaveError?.index === index && (
+                            <p className="form-message form-error" role="alert">
+                              {responsibleSaveError.message}
+                            </p>
+                          )}
+                        </>
+                      )}
                       {responsibles.length > 1 && (
                         <button
                           className="profile-remove-responsible"
-                          onClick={() => setResponsibles((current) =>
-                            current.filter((_item, currentIndex) => currentIndex !== index),
-                          )}
+                          onClick={() => {
+                            if (responsible.id) {
+                              setCollapsedResponsibleIds((current) =>
+                                current.filter((id) => id !== responsible.id),
+                              );
+                            }
+                            setResponsibles((current) =>
+                              current.filter((_item, currentIndex) => currentIndex !== index),
+                            );
+                          }}
                           type="button"
                         >
                           Remover responsável
@@ -465,10 +803,7 @@ export function PersonProfile({
                   {responsibles.length < 5 && (
                     <button
                       className="profile-add-responsible"
-                      onClick={() => setResponsibles((current) => [
-                        ...current,
-                        { fullName: "", phone: "", relationship: "", notificationAuthorized: false },
-                      ])}
+                      onClick={addResponsible}
                       type="button"
                     >
                       + Adicionar responsável
@@ -561,162 +896,24 @@ export function PersonProfile({
               </button>
             </div>
           </form>
-        ) : studentProfile ? (
-          <div className="profile-sections">
-            <Section title="Dados do cadastro">
-              <p>Registrado em {formatDateTime(studentProfile.student.createdAt)}</p>
-              {studentProfile.student.photoAuthorizationDate && (
-                <p>
-                  Autorização da foto confirmada em {formatDateTime(studentProfile.student.photoAuthorizationDate)}
-                  {studentProfile.student.photoAuthorizedBy ? ` por ${studentProfile.student.photoAuthorizedBy}` : ""}
-                </p>
-              )}
-            </Section>
-            <Section title="Matrículas e turmas">
-              {studentProfile.enrollments.length === 0 ? <p>Nenhuma matrícula encontrada.</p> : (
-                <ul className="profile-list">
-                  {studentProfile.enrollments.map((enrollment, index) => (
-                    <li key={`${enrollment.year}-${enrollment.className}-${index}`}>
-                      <strong>{enrollment.grade} · Turma {enrollment.className} · {enrollment.year}</strong>
-                      <span>{enrollment.status === "active" ? "Ativa" : enrollment.status === "completed" ? "Concluída" : "Transferida"} · {formatDate(enrollment.startedAt)}{enrollment.endedAt ? ` até ${formatDate(enrollment.endedAt)}` : ""}</span>
-                      {enrollment.teachers.length > 0 && <span>Professores: {enrollment.teachers.join(", ")}</span>}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Section>
-            <Section title="Responsáveis">
-              {studentProfile.responsiblesRestricted ? (
-                <p>Os contatos dos responsáveis são restritos à administração.</p>
-              ) : studentProfile.responsibles.length === 0 ? <p>Nenhum responsável cadastrado.</p> : (
-                <ul className="profile-list">
-                  {studentProfile.responsibles.map((responsible) => (
-                    <li key={responsible.id}>
-                      <strong>{responsible.fullName} · {responsible.relationship}</strong>
-                      <span>{responsible.phone} · {responsible.notificationAuthorized ? "Autorizado para notificações" : "Sem autorização de notificações"}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Section>
-            <Section title="Avaliações e resultados">
-              {studentProfile.assessments.length === 0 ? <p>Nenhuma avaliação cadastrada.</p> : (
-                <ul className="profile-list">
-                  {studentProfile.assessments.map((assessment) => (
-                    <li key={`${assessment.id}-${assessment.year}`}>
-                      <strong>{assessment.title} · {assessment.subject}</strong>
-                      <span>{assessment.classLabel} · {assessment.year} · {formatDate(assessment.scheduledOn)}</span>
-                      <span>Resultado: {assessment.score === null ? "Ainda não registrado" : `${assessment.score} / ${assessment.maxPoints}`}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Section>
-            <Section title="Histórico de comportamento">
-              {studentProfile.behavior.length === 0 ? <p>Nenhuma observação registrada.</p> : (
-                <ul className="profile-list">
-                  {studentProfile.behavior.map((record) => (
-                    <li key={record.id}>
-                      <strong>{behaviorCategoryLabel(record.category)} · {formatDate(record.occurredOn)} · {record.classLabel}</strong>
-                      <span>{record.description}</span>
-                      <small>Registrado por {record.recordedBy}</small>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Section>
-            <Section title="Horários">
-              {studentProfile.schedules.length === 0 ? <p>Nenhum horário cadastrado.</p> : (
-                <ul className="profile-list">
-                  {studentProfile.schedules.map((schedule, index) => (
-                    <li key={`${schedule.year}-${schedule.dayOfWeek}-${schedule.startsAt}-${index}`}>
-                      <strong>{schedule.grade} · Turma {schedule.className} · {schedule.year}</strong>
-                      <span>{weekdays[schedule.dayOfWeek]} · {schedule.startsAt.slice(0, 5)}–{schedule.endsAt.slice(0, 5)} · {schedule.subject}{schedule.teacher ? ` · ${schedule.teacher}` : ""}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Section>
-            <Section title="Eventos da turma">
-              {studentProfile.events.length === 0 ? <p>Nenhum evento relacionado.</p> : (
-                <ul className="profile-list">
-                  {studentProfile.events.map((schoolEvent) => (
-                    <li key={schoolEvent.id}>
-                      <strong>{schoolEvent.title} · {schoolEvent.status === "published" ? "Publicado" : "Cancelado"}</strong>
-                      <span>{formatDateTime(schoolEvent.startsAt)}{schoolEvent.location ? ` · ${schoolEvent.location}` : ""}</span>
-                      {schoolEvent.description && <span>{schoolEvent.description}</span>}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Section>
-          </div>
-        ) : teacherProfile ? (
-          <div className="profile-sections">
-            <Section title="Dados da conta">
-              <p>Email: {teacherProfile.teacher.email}</p>
-              <p>Telefone de contato da escola: {teacherProfile.teacher.phone ?? "Não informado"}</p>
-              <p>Conta criada em {formatDateTime(teacherProfile.teacher.createdAt)}</p>
-            </Section>
-            <Section title="Turmas atribuídas">
-              {teacherProfile.classes.length === 0 ? <p>Nenhuma turma atribuída.</p> : (
-                <ul className="profile-list">
-                  {teacherProfile.classes.map((schoolClass, index) => (
-                    <li key={`${schoolClass.year}-${schoolClass.name}-${index}`}>
-                      <strong>{schoolClass.grade} · Turma {schoolClass.name} · {schoolClass.year}</strong>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Section>
-            <Section title="Horários de aula">
-              {teacherProfile.schedules.length === 0 ? <p>Nenhum horário associado.</p> : (
-                <ul className="profile-list">
-                  {teacherProfile.schedules.map((schedule, index) => (
-                    <li key={`${schedule.year}-${schedule.dayOfWeek}-${schedule.startsAt}-${index}`}>
-                      <strong>{schedule.grade} · Turma {schedule.className} · {schedule.year}</strong>
-                      <span>{weekdays[schedule.dayOfWeek]} · {schedule.startsAt.slice(0, 5)}–{schedule.endsAt.slice(0, 5)} · {schedule.subject}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Section>
-            <Section title={`Avaliações criadas · ${teacherProfile.assessments.length}`}>
-              {teacherProfile.assessments.length === 0 ? <p>Nenhuma avaliação criada.</p> : (
-                <ul className="profile-list">
-                  {teacherProfile.assessments.map((assessment) => (
-                    <li key={assessment.id}>
-                      <strong>{assessment.title} · {assessment.subject}</strong>
-                      <span>{assessment.classLabel} · {assessment.year} · {formatDate(assessment.scheduledOn)}</span>
-                      <span>Máximo: {assessment.maxPoints} pontos · {assessment.resultsRecorded} resultados lançados</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Section>
-            <Section title="Alunos sob responsabilidade">
-              <p>
-                {teacherProfile.studentsCount} {teacherProfile.studentsCount === 1 ? "aluno" : "alunos"}
-              </p>
-            </Section>
-            <Section title={`Eventos criados · ${teacherProfile.events.length}`}>
-              {teacherProfile.events.length === 0 ? <p>Nenhum evento criado.</p> : (
-                <ul className="profile-list">
-                  {teacherProfile.events.map((schoolEvent) => (
-                    <li key={schoolEvent.id}>
-                      <strong>{schoolEvent.title} · {schoolEvent.status === "published" ? "Publicado" : "Cancelado"}</strong>
-                      <span>{schoolEvent.audience} · {formatDateTime(schoolEvent.startsAt)}</span>
-                      {schoolEvent.location && <span>{schoolEvent.location}</span>}
-                      {schoolEvent.description && <span>{schoolEvent.description}</span>}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Section>
-          </div>
         ) : null}
         {!isEditing && (
           <div className="profile-dialog-actions">
+            {(studentProfile || teacherProfile) && !loading && !error && (
+              <>
+                <button className="profile-print-button" onClick={() => window.print()} type="button">
+                  Imprimir ficha
+                </button>
+                {canEditProfile && (
+                  <button className="profile-cancel-button" onClick={beginEditing} type="button">
+                    Editar dados
+                  </button>
+                )}
+                {canEditPhoto && (
+                  <div className="profile-photo-action-target" ref={setPhotoActionsContainer} />
+                )}
+              </>
+            )}
             <button className="profile-cancel-button" disabled={saving} onClick={onClose} type="button">
               Fechar
             </button>

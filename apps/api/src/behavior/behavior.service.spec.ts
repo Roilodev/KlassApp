@@ -173,4 +173,43 @@ describe('BehaviorService', () => {
       expect.arrayContaining(['teacher']),
     );
   });
+
+  it('rejects student searches shorter than two characters before querying the database', async () => {
+    const { service, query } = makeService(async () => ({ rows: [], rowCount: 0 }));
+
+    await expect(
+      service.searchStudents('school-id', 'user-id', 'admin', ' a '),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it('searches active students only in classes available to the teacher', async () => {
+    const { service, query } = makeService(async () => ({
+      rows: [{
+        id: studentId,
+        enrollmentId,
+        fullName: 'Estudante de teste',
+        grade: '4º ano',
+        className: 'A',
+        year: 2026,
+      }],
+      rowCount: 1,
+    }));
+
+    await expect(
+      service.searchStudents('school-id', 'teacher-id', 'teacher', ' estudante '),
+    ).resolves.toEqual([{
+      id: studentId,
+      enrollmentId,
+      fullName: 'Estudante de teste',
+      classLabel: '4º ano · Turma A · 2026',
+    }]);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('teacher_class_assignments'),
+      ['school-id', 'estudante', 'teacher-id', 'teacher'],
+    );
+    expect(query.mock.calls[0]?.[0]).toContain("student_enrollments.status = 'active'");
+    expect(query.mock.calls[0]?.[0]).toContain("grades.name || ' · Turma ' || classes.name");
+    expect(query.mock.calls[0]?.[0]).toContain('LIMIT 50');
+  });
 });

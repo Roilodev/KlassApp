@@ -227,50 +227,6 @@ export function EventManagement({ initialEvents, classes, schoolName }: EventMan
 
   return (
     <>
-      <section className="class-panel student-create-panel event-create-panel" aria-labelledby="event-create-heading">
-        <div className="student-create-copy">
-          <div className="setup-icon" aria-hidden="true">▣</div>
-          <div>
-            <p className="card-kicker">AGENDA DA COMUNIDADE</p>
-            <h2 id="event-create-heading">Eventos escolares</h2>
-            <p>Publique eventos para toda a escola, um ano escolar ou uma turma.</p>
-          </div>
-        </div>
-        <button
-          className="class-submit student-create-button"
-          onClick={() => {
-            setError("");
-            setMessage("");
-            setIsFormOpen(true);
-          }}
-          type="button"
-        >
-          + Novo evento
-        </button>
-        <button
-          className="event-display-button"
-          onClick={() => {
-            flushSync(() => {
-              setPresentationError("");
-              setCurrentTime(Date.now());
-              setIsPresentationOpen(true);
-            });
-            const presentation = presentationRef.current;
-            if (presentation) {
-              void openPresentation(presentation);
-            }
-          }}
-          type="button"
-        >
-          <span aria-hidden="true">▣</span> Exibir no painel
-        </button>
-        {classes.length === 0 && (
-          <p className="student-create-hint">Você pode publicar eventos para toda a escola. Cadastre turmas para direcionar eventos a um grupo. <Link href="/turmas">Ir para Turmas</Link></p>
-        )}
-        {error && <p className="form-message form-error" role="alert">{error}</p>}
-        {message && <p className="form-message form-success" role="status">{message}</p>}
-      </section>
-
       {isFormOpen && (
         <EntryFormDialog
           description="Escolha quem deve participar: toda a escola, uma turma ou todas as turmas de um ano escolar."
@@ -388,8 +344,45 @@ export function EventManagement({ initialEvents, classes, schoolName }: EventMan
             <p className="card-kicker">AGENDA DA ESCOLA</p>
             <h2 id="events-title">Agenda de eventos</h2>
           </div>
-          <span className="class-count">{events.length}</span>
+          <div className="class-list-actions">
+            <button
+              className="class-submit"
+              onClick={() => {
+                setError("");
+                setMessage("");
+                setIsFormOpen(true);
+              }}
+              type="button"
+            >
+              Novo evento
+            </button>
+            <button
+              className="event-display-button"
+              onClick={() => {
+                flushSync(() => {
+                  setPresentationError("");
+                  setCurrentTime(Date.now());
+                  setIsPresentationOpen(true);
+                });
+                const presentation = presentationRef.current;
+                if (presentation) {
+                  void openPresentation(presentation);
+                }
+              }}
+              type="button"
+            >
+              <span aria-hidden="true">▣</span> Exibir no painel
+            </button>
+            <span className="class-count">{events.length}</span>
+          </div>
         </div>
+        {classes.length === 0 && (
+          <p className="student-create-hint">
+            Você pode publicar eventos para toda a escola. Cadastre turmas para direcionar eventos a um grupo. <Link href="/turmas">Ir para Turmas</Link>
+          </p>
+        )}
+        {error && <p className="form-message form-error" role="alert">{error}</p>}
+        {message && <p className="form-message form-success" role="status">{message}</p>}
         {events.length === 0 ? (
           <div className="empty-classes">
             <span aria-hidden="true">🎈</span>

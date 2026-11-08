@@ -29,6 +29,7 @@ interface BehaviorStudent {
   id: string;
   enrollmentId: string;
   fullName: string;
+  classLabel: string;
 }
 
 interface BehaviorRecord {
@@ -79,9 +80,9 @@ function sortBehaviorRecords(records: BehaviorRecord[]) {
 }
 
 export function BehaviorManagement({ classes, canEditPhoto }: BehaviorManagementProps) {
-  const [classId, setClassId] = useState(classes[0]?.id ?? "");
+  const [search, setSearch] = useState("");
   const [students, setStudents] = useState<BehaviorStudent[]>([]);
-  const [studentId, setStudentId] = useState("");
+  const [selectedStudent, setSelectedStudent] = useState<BehaviorStudent | null>(null);
   const [records, setRecords] = useState<BehaviorRecord[]>([]);
   const [occurredOn, setOccurredOn] = useState(localDateValue);
   const [category, setCategory] = useState<BehaviorCategory>("participation");
@@ -94,24 +95,29 @@ export function BehaviorManagement({ classes, canEditPhoto }: BehaviorManagement
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [showStudentProfile, setShowStudentProfile] = useState(false);
-  const selectedStudent = students.find((student) => student.id === studentId);
+  const studentId = selectedStudent?.id ?? "";
+  const selectedEnrollmentId = selectedStudent?.enrollmentId ?? "";
 
   useEffect(() => {
-    if (!classId) {
+    const query = search.trim();
+    if (query.length < 2) {
       return;
     }
 
     const controller = new AbortController();
-    async function loadStudents() {
+    async function searchStudents() {
       setLoadingStudents(true);
       setError("");
       try {
-        const response = await fetch(`${apiUrl}/behavior/classes/${classId}/students`, {
-          credentials: "include",
-          signal: controller.signal,
-        });
+        const response = await fetch(
+          `${apiUrl}/behavior/students?q=${encodeURIComponent(query)}`,
+          {
+            credentials: "include",
+            signal: controller.signal,
+          },
+        );
         if (!response.ok) {
-          await showRequestError(response, setError, "Não foi possível carregar os alunos da turma.");
+          await showRequestError(response, setError, "Não foi possível buscar os estudantes.");
           return;
         }
         setStudents(await response.json() as BehaviorStudent[]);
@@ -125,10 +131,13 @@ export function BehaviorManagement({ classes, canEditPhoto }: BehaviorManagement
         }
       }
     }
-    void loadStudents();
+    const timeout = window.setTimeout(() => void searchStudents(), 250);
 
-    return () => controller.abort();
-  }, [classId]);
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [search]);
 
   useEffect(() => {
     if (!studentId) {
@@ -162,11 +171,11 @@ export function BehaviorManagement({ classes, canEditPhoto }: BehaviorManagement
     void loadRecords();
 
     return () => controller.abort();
-  }, [studentId]);
+  }, [studentId, selectedEnrollmentId]);
 
   async function addRecord(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const student = students.find((item) => item.id === studentId);
+    const student = selectedStudent;
     if (!student) {
       setError("Selecione um aluno com matrícula ativa.");
       return;
@@ -210,7 +219,7 @@ export function BehaviorManagement({ classes, canEditPhoto }: BehaviorManagement
           <div>
             <p className="card-kicker">ACOMPANHAMENTO CUIDADOSO</p>
             <h2 id="behavior-create-heading">Histórico de comportamento</h2>
-            <p>Selecione uma turma e um aluno para consultar ou registrar uma observação.</p>
+            <p>Busque um estudante pelo nome, pela turma ou pelo ano escolar.</p>
           </div>
         </div>
 
@@ -222,80 +231,70 @@ export function BehaviorManagement({ classes, canEditPhoto }: BehaviorManagement
           </div>
         ) : (
           <>
-            <div className="behavior-selection-fields">
-            <label>
-              Turma
-              <select
+            <label className="behavior-student-search">
+              Buscar estudante
+              <input
+                autoComplete="off"
+                maxLength={100}
                 onChange={(event) => {
-                  setClassId(event.target.value);
+                  const value = event.target.value;
+                  setSearch(value);
+                  setLoadingStudents(value.trim().length >= 2);
                   setStudents([]);
-                  setStudentId("");
+                  setSelectedStudent(null);
                   setRecords([]);
                   setRecordsError("");
-                  setLoadingStudents(false);
                   setLoadingRecords(false);
                   setError("");
                   setMessage("");
+                  setShowStudentProfile(false);
                 }}
-                required
-                value={classId}
-              >
-                {classes.map((schoolClass) => (
-                  <option key={schoolClass.id} value={schoolClass.id}>
-                    {schoolClass.grade} · Turma {schoolClass.name} · {schoolClass.year}
-                  </option>
-                ))}
-              </select>
+                placeholder="Nome, turma ou ano escolar"
+                type="search"
+                value={search}
+              />
             </label>
-            <label>
-              Aluno
-              <select
-                disabled={loadingStudents || students.length === 0}
-                onChange={(event) => {
-                  setStudentId(event.target.value);
-                  setRecords([]);
-                  setRecordsError("");
-                  setLoadingRecords(false);
-                  setError("");
-                  setMessage("");
-                }}
-                required
-                value={studentId}
-              >
-                <option value="">
-                  {loadingStudents ? "Carregando alunos..." : "Selecione um aluno"}
-                </option>
+            {search.trim().length < 2 ? (
+              <p className="student-create-hint">Digite pelo menos 2 caracteres para buscar.</p>
+            ) : loadingStudents ? (
+              <p className="student-create-hint" role="status">Buscando estudantes...</p>
+            ) : students.length === 0 ? (
+              <p className="student-create-hint">Nenhum estudante encontrado para essa busca.</p>
+            ) : (
+              <ul className="behavior-student-results" aria-label="Resultados da busca">
                 {students.map((student) => (
-                  <option key={student.id} value={student.id}>{student.fullName}</option>
+                  <li key={student.enrollmentId}>
+                    <button
+                      aria-pressed={selectedStudent?.enrollmentId === student.enrollmentId}
+                      className={`behavior-student-result${selectedStudent?.enrollmentId === student.enrollmentId ? " selected" : ""}`}
+                      onClick={() => {
+                        if (selectedStudent?.enrollmentId === student.enrollmentId) {
+                          return;
+                        }
+                        setSelectedStudent(student);
+                        setRecords([]);
+                        setRecordsError("");
+                        setLoadingRecords(false);
+                        setError("");
+                        setMessage("");
+                      }}
+                      type="button"
+                    >
+                      <strong>{student.fullName}</strong>
+                      <span>{student.classLabel}</span>
+                    </button>
+                  </li>
                 ))}
-              </select>
-            </label>
-            </div>
-            <button
-              className="class-submit behavior-create-button"
-              disabled={!studentId}
-              onClick={() => {
-                setError("");
-                setMessage("");
-                setIsFormOpen(true);
-              }}
-              type="button"
-            >
-              + Nova observação
-            </button>
-            {!studentId && (
+              </ul>
+            )}
+            {students.length === 50 && (
               <p className="student-create-hint">
-                {loadingStudents
-                  ? "Carregando alunos da turma..."
-                  : students.length === 0
-                    ? "Nenhum aluno com matrícula ativa nesta turma."
-                    : "Selecione um aluno antes de registrar uma observação."}
+                Exibindo até 50 resultados. Refine a busca para encontrar outros estudantes.
               </p>
             )}
           </>
         )}
         {error && <p className="form-message form-error" role="alert">{error}</p>}
-        {message && <p className="form-message form-success" role="status">{message}</p>}
       </section>
 
       {isFormOpen && (
@@ -310,7 +309,7 @@ export function BehaviorManagement({ classes, canEditPhoto }: BehaviorManagement
         >
           {selectedStudent && (
             <p className="behavior-target-student">
-              Aluno: <strong>{selectedStudent.fullName}</strong>
+              Aluno: <strong>{selectedStudent.fullName}</strong> · {selectedStudent.classLabel}
             </p>
           )}
           <form className="behavior-form" onSubmit={addRecord}>
@@ -374,8 +373,21 @@ export function BehaviorManagement({ classes, canEditPhoto }: BehaviorManagement
               {selectedStudent?.fullName ?? "Escolha um aluno"}
             </h2>
           </div>
-          {studentId && (
-            <div className="profile-history-actions">
+          <div className="profile-history-actions">
+            <button
+              className="class-submit behavior-create-button"
+              disabled={!studentId}
+              onClick={() => {
+                setError("");
+                setMessage("");
+                setIsFormOpen(true);
+              }}
+              type="button"
+            >
+              Nova observação
+            </button>
+            {studentId && (
+              <>
               <button
                 className="profile-link-button"
                 onClick={() => setShowStudentProfile(true)}
@@ -384,13 +396,15 @@ export function BehaviorManagement({ classes, canEditPhoto }: BehaviorManagement
                 Ver perfil completo
               </button>
               <span className="class-count">{records.length}</span>
-            </div>
-          )}
+              </>
+            )}
+          </div>
         </div>
+        {message && <p className="form-message form-success" role="status">{message}</p>}
         {!studentId ? (
           <div className="empty-classes">
             <span aria-hidden="true">✿</span>
-            <strong>Selecione um aluno para consultar o histórico</strong>
+            <strong>Busque e selecione um estudante para consultar o histórico</strong>
             <p>O acesso ao histórico é filtrado pelas turmas associadas ao seu perfil.</p>
           </div>
         ) : loadingRecords ? (
@@ -451,7 +465,7 @@ async function showRequestError(
   if (response.status === 401) {
     setError("Sua sessão expirou. Entre novamente para continuar.");
   } else if (response.status === 403) {
-    setError("Você não tem permissão para acessar esta turma.");
+    setError("Você não tem permissão para acessar esses dados.");
   } else if (response.status === 429) {
     setError("Muitas tentativas. Aguarde um momento e tente novamente.");
   } else {

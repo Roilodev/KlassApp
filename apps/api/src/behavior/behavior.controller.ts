@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -39,6 +40,19 @@ export class BehaviorController {
       request.user.id,
       request.user.role,
       classId,
+    );
+  }
+
+  @Get('students')
+  searchStudents(
+    @Req() request: AuthenticatedRequest,
+    @Query('q') query: string,
+  ) {
+    return this.behavior.searchStudents(
+      request.user.schoolId,
+      request.user.id,
+      request.user.role,
+      query,
     );
   }
 

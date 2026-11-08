@@ -8,6 +8,8 @@ import { jwtVerify, SignJWT } from 'jose';
 import { DatabaseService } from '../database/database.service.js';
 import { PasswordService } from './password.service.js';
 
+export const AUTH_SESSION_DURATION_SECONDS = 60 * 60;
+
 export interface SchoolMembership {
   schoolId: string;
   schoolName: string;
@@ -83,7 +85,7 @@ export class AuthService {
       .setProtectedHeader({ alg: 'HS256' })
       .setSubject(account.id)
       .setIssuedAt()
-      .setExpirationTime('15m')
+      .setExpirationTime(`${AUTH_SESSION_DURATION_SECONDS}s`)
       .sign(this.signingKey);
 
     return {

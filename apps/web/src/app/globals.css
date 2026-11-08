@@ -700,47 +700,6 @@ h1 span {
   font-size: 14px;
 }
 
-.student-create-panel,
-.teacher-create-panel {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px 18px;
-}
-
-.student-create-copy {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.student-create-copy h2 {
-  margin: 5px 0 4px;
-  color: #344057;
-  font-size: 16px;
-}
-
-.student-create-copy p:last-child {
-  margin: 0;
-  color: #7b8597;
-  font-size: 14px;
-}
-
-.student-create-button {
-  justify-self: end;
-}
-
-.student-create-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.student-create-hint,
-.student-create-panel > .form-message {
-  grid-column: 1 / -1;
-  margin: 0;
-}
-
 .student-create-hint {
   color: #838c9c;
   font-size: 13px;
@@ -810,7 +769,13 @@ h1 span {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.class-edit-dialog-form .class-form-actions {
+.class-create-dialog-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.class-edit-dialog-form .class-form-actions,
+.class-create-dialog-form .class-form-actions,
+.class-create-dialog-form > .form-message {
   grid-column: 1 / -1;
 }
 
@@ -1182,10 +1147,6 @@ h1 span {
 .event-cancel-button:disabled {
   cursor: wait;
   opacity: 0.7;
-}
-
-.event-create-panel {
-  grid-template-columns: minmax(0, 1fr) auto auto;
 }
 
 .event-display-button {
@@ -1837,22 +1798,19 @@ h1 span {
 
 .behavior-entry-panel {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  align-items: end;
+  grid-template-columns: minmax(0, 1fr);
   gap: 13px;
 }
 
 .behavior-entry-panel > .class-panel-heading,
+.behavior-entry-panel > .behavior-student-search,
+.behavior-entry-panel > .behavior-student-results,
 .behavior-entry-panel > .student-create-hint,
 .behavior-entry-panel > .form-message {
   grid-column: 1 / -1;
 }
 
-.behavior-selection-fields {
-  display: contents;
-}
-
-.behavior-selection-fields label {
+.behavior-student-search {
   display: grid;
   gap: 7px;
   color: #455168;
@@ -1860,14 +1818,7 @@ h1 span {
   font-weight: 700;
 }
 
-.behavior-selection-fields {
-  /*
-   * Its labels participate in the parent grid so both selectors and the action
-   * button can share one row on desktop.
-   */
-}
-
-.behavior-selection-fields select {
+.behavior-student-search input {
   width: 100%;
   min-height: 41px;
   padding: 0 11px;
@@ -1880,9 +1831,48 @@ h1 span {
   font-size: 15px;
 }
 
-.behavior-selection-fields select:focus {
+.behavior-student-search input:focus {
   border-color: #9a88e6;
   box-shadow: 0 0 0 3px #eee9ff;
+}
+
+.behavior-student-results {
+  display: grid;
+  max-height: 250px;
+  gap: 7px;
+  overflow: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.behavior-student-result {
+  display: flex;
+  width: 100%;
+  min-height: 50px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 3px;
+  padding: 8px 12px;
+  border: 1px solid #e8e4dc;
+  border-radius: 9px;
+  background: #fffefa;
+  color: #455168;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.behavior-student-result:hover,
+.behavior-student-result.selected {
+  border-color: #d7c6ae;
+  background: #fff7e9;
+}
+
+.behavior-student-result span {
+  color: #838c9c;
+  font-size: 12px;
 }
 
 .behavior-create-button {
@@ -2090,6 +2080,13 @@ h1 span {
   margin: 0 0 14px;
 }
 
+.class-list-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
 .class-count {
   display: grid;
   width: 30px;
@@ -2277,15 +2274,119 @@ h1 span {
 
 .profile-dialog-actions {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
+  gap: 8px;
   margin-top: 20px;
   padding-top: 16px;
   border-top: 1px solid #eee2d1;
 }
 
+.profile-photo-action-target {
+  display: flex;
+  flex: 0 0 auto;
+}
+
+.profile-dialog-actions .person-photo-actions-footer {
+  position: static;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 6px;
+  border: 1px solid #e8e1d6;
+  border-radius: 10px;
+  background: #fffaf1;
+}
+
+.profile-dialog-actions .person-photo-actions-label {
+  display: inline;
+  width: auto;
+  height: auto;
+  color: #947a5e;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.profile-dialog-actions .person-photo-actions-footer button {
+  display: flex;
+  width: auto;
+  height: 34px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid #e5e1f4;
+  border-radius: 8px;
+  background: #f8f6ff;
+  color: #6951ca;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.profile-dialog-actions .person-photo-actions-footer button:hover:not(:disabled) {
+  border-color: #c9c0ec;
+  background: #efebff;
+}
+
+.profile-dialog-actions .person-photo-actions-footer button svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  color: currentColor;
+  stroke: currentColor;
+}
+
 @media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm;
+  }
+
   body * {
     visibility: hidden !important;
+  }
+
+  .profile-backdrop:has(.student-ficha-sheet) {
+    position: static;
+    display: block;
+    overflow: visible;
+    padding: 0;
+    background: white;
+    visibility: visible !important;
+  }
+
+  .person-profile-dialog:has(.student-ficha-sheet) {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+    max-height: none;
+    overflow: visible;
+    padding: 0;
+    border: 0;
+    box-shadow: none;
+    visibility: visible !important;
+  }
+
+  .person-profile-dialog:has(.student-ficha-sheet) > :not(.student-ficha-sheet) {
+    display: none !important;
+  }
+
+  .student-ficha-sheet,
+  .student-ficha-sheet * {
+    visibility: visible !important;
+  }
+
+  .student-ficha-sheet {
+    display: block !important;
+    width: 100%;
+    margin: 0;
+    border: 1px solid #d8c8ae;
+    border-radius: 5mm;
+    box-shadow: none;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
   }
 
   .profile-backdrop:has(.class-details-print-dialog) {
@@ -2811,6 +2912,184 @@ h1 span {
   min-width: 0;
 }
 
+.student-table-tools {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.student-table-tools .people-search {
+  width: min(440px, 100%);
+  margin-bottom: 15px;
+}
+
+.student-results-count {
+  margin: 0 0 24px;
+  color: #838c9c;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.student-table-scroll {
+  overflow-x: auto;
+  border: 1px solid #eee8de;
+  border-radius: 12px;
+  overscroll-behavior-x: contain;
+}
+
+.student-table-scroll:focus-visible {
+  outline: 2px solid #8068dc;
+  outline-offset: 3px;
+}
+
+.student-table {
+  width: 100%;
+  min-width: 700px;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.student-table th {
+  padding: 12px 16px;
+  background: #fffaf1;
+  color: #777064;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.student-table td {
+  padding: 13px 16px;
+  border-top: 1px solid #f1eee8;
+  color: #596579;
+  font-size: 13px;
+  vertical-align: middle;
+}
+
+.student-table tbody tr {
+  transition: background 150ms ease;
+}
+
+.student-table tbody tr:hover {
+  background: #fffdf9;
+}
+
+.student-table-person {
+  display: flex;
+  min-width: 200px;
+  align-items: center;
+  gap: 10px;
+}
+
+.student-table-person .student-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+}
+
+.student-name-button {
+  padding: 5px 0;
+  border: 0;
+  background: transparent;
+  color: #39445a;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+}
+
+.student-name-button:hover {
+  color: #9a5c2f;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.student-name-button:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid #8068dc;
+  outline-offset: 3px;
+}
+
+.student-table-class,
+.student-table-year,
+.student-table-contact {
+  display: block;
+}
+
+.student-table-class {
+  color: #455168;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.student-table-year,
+.student-table-contact small,
+.student-table-muted {
+  margin-top: 4px;
+  color: #838c9c;
+  font-size: 12px;
+}
+
+.student-table-contact {
+  display: grid;
+  gap: 3px;
+}
+
+.student-table-contact > span {
+  color: #455168;
+}
+
+.student-table-contact small,
+.student-table-year {
+  display: block;
+}
+
+.student-enrollment-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #edf7ee;
+  color: #47805a;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.student-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 16px;
+  color: #747d8d;
+  font-size: 13px;
+}
+
+.student-pagination button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #e8e1d6;
+  border-radius: 9px;
+  background: white;
+  color: #65564a;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+
+.student-pagination button:hover:not(:disabled) {
+  border-color: #dfc9aa;
+  background: #fffaf1;
+}
+
+.student-pagination button:disabled {
+  color: #b6b3ae;
+  cursor: not-allowed;
+}
+
 .student-responsible-list {
   display: grid;
   gap: 4px;
@@ -2871,17 +3150,341 @@ h1 span {
   border-bottom: 1px solid #eeedf3;
 }
 
+.person-profile-dialog:has(.profile-edit-form) .person-profile-heading {
+  position: sticky;
+  z-index: 3;
+  top: -28px;
+  margin: -28px -28px 0;
+  padding: 32px 66px 16px 28px;
+  background: #fff;
+}
+
 .person-profile-copy {
   min-width: 0;
   flex: 1;
 }
 
-.profile-heading-actions {
-  align-self: stretch;
+.student-ficha-sheet {
+  overflow: hidden;
+  margin-bottom: 20px;
+  border: 1px solid #eadfcf;
+  border-radius: 18px;
+  background: #fffefa;
+  box-shadow: 0 8px 24px rgb(65 53 34 / 7%);
+}
+
+.teacher-ficha-sheet {
+  overflow: clip;
+}
+
+.teacher-ficha-sheet .student-ficha-identity {
+  position: sticky;
+  z-index: 2;
+  top: -28px;
+  margin-inline: -24px;
+  padding: 16px 24px;
+  background: #fffefa;
+  box-shadow: 0 7px 12px rgb(65 53 34 / 8%);
+}
+
+.teacher-ficha-sheet .student-ficha-identity::before {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  left: 0;
+  height: 28px;
+  background: #fffefa;
+  content: "";
+}
+
+.student-ficha-header {
   display: flex;
   align-items: center;
-  padding-left: 20px;
-  border-left: 1px solid #eeedf3;
+  gap: 18px;
+  padding: 22px 26px;
+  background:
+    radial-gradient(circle at 95% 0%, #fff4bf 0 15%, transparent 15.5%),
+    linear-gradient(120deg, #d9f0e2 0%, #e8f4ce 48%, #fff0cc 100%);
+}
+
+.student-ficha-heading-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.student-ficha-mark {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 2px solid rgb(255 255 255 / 90%);
+  border-radius: 18px;
+  background: #fffefa;
+  color: #43856a;
+  font-size: 30px;
+  box-shadow: 0 4px 12px rgb(48 83 63 / 10%);
+}
+
+.student-ficha-header p,
+.student-ficha-header span {
+  margin: 0;
+  color: #536e59;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+}
+
+.student-ficha-header h1 {
+  margin: 4px 0;
+  color: #344a3c;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 26px;
+  line-height: 1.15;
+}
+
+.student-ficha-header div > span {
+  color: #6d7f6d;
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  font-weight: 600;
+  text-transform: none;
+}
+
+.student-ficha-content {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 20px 24px;
+}
+
+.student-ficha-identity {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  gap: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #eee6d8;
+}
+
+.student-ficha-photo .person-photo {
+  flex-basis: auto;
+}
+
+.student-ficha-photo .person-photo-frame {
+  width: 112px;
+  height: 112px;
+  border: 3px solid #f3d87c;
+  border-radius: 18px;
+  background: #e8f4e9;
+  color: #43856a;
+}
+
+.student-ficha-photo .person-photo-actions {
+  display: none;
+}
+
+.student-ficha-name h2 {
+  margin: 5px 0;
+  color: #344a3c;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 24px;
+  overflow-wrap: anywhere;
+}
+
+.student-ficha-name > p:last-child {
+  margin: 0;
+  color: #7b806f;
+  font-size: 12px;
+}
+
+.student-ficha-section {
+  min-width: 0;
+  padding: 15px;
+  border: 1px solid #efe6d7;
+  border-radius: 13px;
+  background: #fff;
+}
+
+.student-ficha-section h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 11px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid #f1eee8;
+  color: #405d4b;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 16px;
+}
+
+.student-ficha-section h2 span {
+  display: grid;
+  width: 27px;
+  height: 27px;
+  place-items: center;
+  border-radius: 9px;
+  background: #eaf4e5;
+  color: #4c8b69;
+  font-family: sans-serif;
+  font-size: 16px;
+}
+
+.student-ficha-section ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.student-ficha-section li {
+  display: grid;
+  gap: 3px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f0ece4;
+  overflow-wrap: anywhere;
+}
+
+.student-ficha-section li:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.student-ficha-section li strong {
+  color: #455168;
+  font-size: 13px;
+}
+
+.student-ficha-section li span,
+.student-ficha-section > p {
+  margin: 0;
+  color: #788397;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.student-ficha-footer {
+  display: flex;
+  justify-content: space-between;
+  padding: 11px 24px;
+  background: #f3f5e7;
+  color: #66745e;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.profile-header-responsibles {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.profile-header-label {
+  margin: 0;
+  color: #9a8065;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.9px;
+}
+
+.profile-header-responsibles ul {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.profile-header-responsibles li {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid #f0e9df;
+  border-radius: 9px;
+  background: #fffdfa;
+  color: #747064;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.profile-header-responsibles li strong {
+  color: #455168;
+  font-size: 13px;
+}
+
+.profile-header-responsibles li small,
+.profile-header-note {
+  color: #8992a2;
+  font-size: 11px;
+}
+
+.profile-header-note {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.profile-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.profile-print-button {
+  min-height: 28px;
+  margin-left: auto;
+  padding: 0 9px;
+  border: 1px solid #d9e8d5;
+  border-radius: 8px;
+  background: #f4f8ed;
+  color: #4e7758;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.profile-print-button:hover {
+  border-color: #b7d1b3;
+  background: #eaf4e5;
+}
+
+.profile-edit-icon {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: #a68d70;
+  cursor: pointer;
+  transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
+}
+
+.profile-edit-icon:hover {
+  border-color: #eee2d1;
+  background: #fffaf1;
+  color: #8c6036;
+}
+
+.profile-edit-icon:focus-visible {
+  outline: 2px solid #8068dc;
+  outline-offset: 2px;
+}
+
+.profile-edit-icon svg {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
 }
 
 .person-profile-heading h2 {
@@ -2904,6 +3507,7 @@ h1 span {
 }
 
 .person-photo-frame {
+  position: relative;
   display: grid;
   width: 150px;
   height: 150px;
@@ -2925,13 +3529,52 @@ h1 span {
 }
 
 .person-photo-actions {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 5px;
+  gap: 4px;
 }
 
-.person-photo-actions button,
+.person-photo-actions button {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgb(255 255 255 / 32%);
+  border-radius: 8px;
+  background: rgb(35 32 29 / 48%);
+  color: #fff;
+  cursor: pointer;
+  backdrop-filter: blur(3px);
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+.person-photo-actions button:hover:not(:disabled) {
+  border-color: rgb(255 255 255 / 58%);
+  background: rgb(35 32 29 / 78%);
+}
+
+.person-photo-actions button svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.person-photo-actions button:focus-visible,
+.camera-capture button,
+.profile-link-button {
+  outline-offset: 2px;
+}
+
+.person-photo-actions button:focus-visible {
+  outline: 2px solid #8068dc;
+}
+
 .camera-capture button,
 .profile-link-button {
   min-height: 32px;
@@ -2959,7 +3602,6 @@ h1 span {
 
 .photo-authorization {
   display: flex;
-  max-width: 240px;
   align-items: flex-start;
   gap: 6px;
   color: #737e92;
@@ -2971,6 +3613,44 @@ h1 span {
   flex: 0 0 auto;
   margin: 1px 0 0;
   accent-color: #8068dc;
+}
+
+.photo-authorization-prompt {
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid #eee2d1;
+  border-radius: 10px;
+  background: #fffaf1;
+}
+
+.photo-authorization-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.photo-authorization-actions button {
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid #e5e1f4;
+  border-radius: 8px;
+  background: #f8f6ff;
+  color: #6951ca;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.photo-authorization-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.photo-authorization-actions button:last-child {
+  border-color: #e8e1d6;
+  background: white;
+  color: #65564a;
 }
 
 .camera-capture {
@@ -3086,7 +3766,6 @@ h1 span {
   gap: 9px;
 }
 
-.profile-edit-button,
 .profile-add-responsible,
 .profile-remove-responsible,
 .profile-cancel-button {
@@ -3099,10 +3778,6 @@ h1 span {
   cursor: pointer;
   font-size: 13px;
   font-weight: 700;
-}
-
-.profile-edit-button {
-  margin: 0;
 }
 
 .profile-edit-form {
@@ -3176,6 +3851,41 @@ h1 span {
   font-weight: 700;
 }
 
+.profile-responsible-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.profile-responsible-summary > div {
+  display: grid;
+  gap: 4px;
+}
+
+.profile-responsible-summary strong {
+  color: #455168;
+  font-size: 14px;
+}
+
+.profile-responsible-summary span {
+  color: #788397;
+  font-size: 13px;
+}
+
+.profile-responsible-edit {
+  min-height: 34px;
+  padding: 0 11px;
+  border: 1px solid #e5e1f4;
+  border-radius: 9px;
+  background: #f8f6ff;
+  color: #6951ca;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .profile-authorization-option {
   display: flex;
   align-items: flex-start;
@@ -3214,6 +3924,12 @@ h1 span {
   color: #a44f4f;
 }
 
+.profile-responsible-save {
+  justify-self: start;
+  min-height: 36px;
+  margin: 0;
+}
+
 .profile-add-responsible {
   justify-self: start;
 }
@@ -3222,6 +3938,25 @@ h1 span {
   display: flex;
   justify-content: flex-end;
   gap: 9px;
+}
+
+.person-profile-dialog:has(.profile-edit-form) .profile-edit-actions {
+  position: sticky;
+  z-index: 3;
+  bottom: -28px;
+  margin: 0 -28px -28px;
+  padding: 14px 28px 28px;
+  border-top: 1px solid #eeedf3;
+  background: rgb(255 255 255 / 96%);
+}
+
+.person-profile-dialog:has(.teacher-ficha-sheet) .profile-dialog-actions {
+  position: sticky;
+  z-index: 3;
+  bottom: -28px;
+  margin: 20px -28px -28px;
+  padding: 14px 28px 28px;
+  background: rgb(255 255 255 / 96%);
 }
 
 .profile-edit-actions .class-submit {
@@ -3922,17 +4657,14 @@ h1 span {
   }
 
   .student-primary-fields,
-  .responsible-fields,
-  .behavior-selection-fields {
+  .responsible-fields {
     display: grid;
     grid-template-columns: 1fr;
   }
 
-  .behavior-entry-panel {
-    grid-template-columns: 1fr;
-  }
-
   .behavior-entry-panel > .class-panel-heading,
+  .behavior-entry-panel > .behavior-student-search,
+  .behavior-entry-panel > .behavior-student-results,
   .behavior-entry-panel > .student-create-hint,
   .behavior-entry-panel > .form-message {
     grid-column: auto;
@@ -3965,28 +4697,51 @@ h1 span {
     padding: 20px 15px;
   }
 
+  .person-profile-dialog:has(.profile-edit-form) .person-profile-heading {
+    top: -20px;
+    margin: -20px -15px 0;
+    padding: 24px 40px 12px 15px;
+  }
+
+  .student-ficha-header {
+    gap: 12px;
+    padding: 17px 16px;
+  }
+
+  .student-ficha-mark {
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+    font-size: 24px;
+  }
+
+  .student-ficha-header h1 {
+    font-size: 21px;
+  }
+
+  .student-ficha-content {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 14px;
+  }
+
+  .student-ficha-identity {
+    gap: 12px;
+  }
+
+  .student-ficha-photo .person-photo-frame {
+    width: 86px;
+    height: 86px;
+    border-radius: 14px;
+  }
+
+  .student-ficha-name h2 {
+    font-size: 19px;
+  }
+
   .entry-form-dialog {
     max-height: calc(100vh - 20px);
     padding: 20px 15px;
-  }
-
-  .student-create-panel,
-  .teacher-create-panel {
-    grid-template-columns: 1fr;
-  }
-
-  .event-create-panel {
-    grid-template-columns: 1fr;
-  }
-
-  .student-create-panel .student-create-button,
-  .teacher-create-panel .student-create-button,
-  .event-display-button {
-    justify-self: stretch;
-  }
-
-  .event-display-button {
-    justify-content: center;
   }
 
   .person-profile-heading {
@@ -4006,14 +4761,6 @@ h1 span {
     grid-column: 2;
   }
 
-  .profile-heading-actions {
-    grid-column: 2;
-    align-self: start;
-    padding: 10px 0 0;
-    border-top: 1px solid #eeedf3;
-    border-left: 0;
-  }
-
   .person-photo-frame {
     width: 105px;
     height: 105px;
@@ -4022,8 +4769,20 @@ h1 span {
   }
 
   .person-photo-actions {
-    display: grid;
-    width: 100%;
+    right: 4px;
+    bottom: 4px;
+    gap: 3px;
+  }
+
+  .person-photo-actions button {
+    width: 23px;
+    height: 23px;
+    border-radius: 7px;
+  }
+
+  .person-photo-actions button svg {
+    width: 13px;
+    height: 13px;
   }
 
   .person-profile-heading h2 {
@@ -4031,8 +4790,35 @@ h1 span {
     overflow-wrap: anywhere;
   }
 
+  .profile-header-responsibles ul {
+    grid-template-columns: 1fr;
+  }
+
   .profile-sections {
     grid-template-columns: 1fr;
+  }
+
+  .person-profile-dialog:has(.profile-edit-form) .profile-edit-actions {
+    bottom: -20px;
+    flex-wrap: wrap;
+    margin: 0 -15px -20px;
+    padding: 12px 15px 20px;
+  }
+
+  .person-profile-dialog:has(.teacher-ficha-sheet) .profile-dialog-actions {
+    bottom: -20px;
+    margin: 20px -15px -20px;
+    padding: 12px 15px 20px;
+  }
+
+  .teacher-ficha-sheet .student-ficha-identity {
+    top: -20px;
+    margin-inline: -14px;
+    padding: 12px 14px;
+  }
+
+  .teacher-ficha-sheet .student-ficha-identity::before {
+    height: 20px;
   }
 
   .profile-history-actions {
@@ -4179,7 +4965,6 @@ h1 span {
 }
 
 .class-panel-heading h2,
-.student-create-copy h2,
 .class-list-heading h2,
 .responsibles-heading h3 {
   color: #3d3029;
@@ -4187,10 +4972,6 @@ h1 span {
 }
 
 .class-panel-heading p:last-child,
-.student-create-copy p:last-child {
-  color: #81766a;
-}
-
 .setup-icon {
   border-radius: 14px;
   background: #fff0d6;
@@ -4232,8 +5013,6 @@ h1 span {
   box-shadow: 0 5px 13px rgb(65 53 34 / 6%);
 }
 
-.student-create-panel,
-.teacher-create-panel,
 .behavior-entry-panel {
   border-color: #eadfcf;
   background: linear-gradient(115deg, #fffefa 0%, #fff7e9 100%);
@@ -4408,6 +5187,40 @@ h1 span {
   .class-list-panel {
     padding: 18px;
     border-radius: 15px;
+  }
+
+  .class-list-heading {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .class-list-actions {
+    width: 100%;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .class-list-actions > .class-submit,
+  .class-list-actions > .event-display-button {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  .student-table-tools {
+    display: block;
+  }
+
+  .student-table-tools .people-search {
+    margin-bottom: 10px;
+  }
+
+  .student-results-count {
+    margin-bottom: 12px;
+    white-space: normal;
+  }
+
+  .student-pagination {
+    gap: 8px;
   }
 }
 

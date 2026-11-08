@@ -48,6 +48,7 @@ export class ProfilesService {
   ) {
     const student = await this.database.query(
       `SELECT students.id, students.full_name AS "fullName",
+              schools.name AS "schoolName",
               students.created_at AS "createdAt",
               (students.photo_data IS NOT NULL) AS "hasPhoto",
               CASE WHEN $4::text = 'admin'
@@ -55,6 +56,7 @@ export class ProfilesService {
               CASE WHEN $4::text = 'admin'
                     THEN photo_authorizer.display_name END AS "photoAuthorizedBy"
        FROM students
+       JOIN schools ON schools.id = students.school_id
        LEFT JOIN users AS photo_authorizer
          ON photo_authorizer.id = students.photo_authorized_by
        WHERE students.school_id = $1 AND students.id = $2
@@ -292,7 +294,7 @@ export class ProfilesService {
   async getTeacherProfile(schoolId: string, teacherId: string) {
     const teacher = await this.database.query(
       `SELECT users.id, users.display_name AS "displayName",
-              users.email, users.created_at AS "createdAt",
+              users.email, users.created_at AS "createdAt", schools.name AS "schoolName",
               school_memberships.phone_e164 AS phone,
               school_memberships.is_active AS "isActive",
               EXISTS (
@@ -302,6 +304,7 @@ export class ProfilesService {
               ) AS "hasPhoto"
        FROM school_memberships
        JOIN users ON users.id = school_memberships.user_id
+       JOIN schools ON schools.id = school_memberships.school_id
        WHERE school_memberships.school_id = $1
          AND school_memberships.user_id = $2
          AND school_memberships.role = 'teacher'`,
@@ -528,7 +531,11 @@ export class ProfilesService {
       }>(
         `SELECT responsible_contacts.id, responsible_contacts.phone_e164,
                 responsible_contacts.full_name,
-                count(*) OVER (PARTITION BY responsible_contacts.id)::integer AS linked_students
+                (SELECT count(*)::integer
+                 FROM student_responsibles AS linked_responsibles
+                 WHERE linked_responsibles.school_id = responsible_contacts.school_id
+                   AND linked_responsibles.responsible_id = responsible_contacts.id
+                ) AS linked_students
          FROM student_responsibles
          JOIN responsible_contacts
            ON responsible_contacts.school_id = student_responsibles.school_id
@@ -625,7 +632,7 @@ export class ProfilesService {
             `INSERT INTO student_responsibles
                (school_id, student_id, responsible_id, relationship,
                 notification_authorized, authorization_recorded_by, authorization_recorded_at)
-             VALUES ($1, $2, $3, $4, $5, CASE WHEN $5 THEN $6 ELSE NULL END,
+             VALUES ($1, $2, $3, $4, $5, CASE WHEN $5 THEN $6::uuid ELSE NULL END,
                      CASE WHEN $5 THEN now() ELSE NULL END)`,
             [
               schoolId,

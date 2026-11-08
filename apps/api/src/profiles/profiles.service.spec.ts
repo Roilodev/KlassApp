@@ -82,6 +82,59 @@ describe('ProfilesService', () => {
     expect(auditCall?.[1]?.[3]).toContain('"nameChanged":true');
   });
 
+  it('adds a responsible when updating a student profile', async () => {
+    const newResponsibleId = 'c0a80123-e89b-42d3-a456-426614174005';
+    const { service, query } = makeService(async (sql) => {
+      if (sql.includes('SELECT full_name FROM students')) {
+        return { rows: [{ full_name: 'Aluno' }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT responsible_contacts.id')) {
+        return { rows: [], rowCount: 0 };
+      }
+      if (sql.includes('INSERT INTO responsible_contacts')) {
+        return { rows: [{ id: newResponsibleId }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 1 };
+    });
+
+    await expect(service.updateStudentProfile(
+      'school-id',
+      'admin-id',
+      'student-id',
+      {
+        fullName: 'Aluno',
+        responsibles: [{
+          fullName: 'Nova responsável',
+          phone: '(11) 98888-7777',
+          relationship: 'Avó',
+          notificationAuthorized: false,
+        }],
+      },
+    )).resolves.toEqual({
+      id: 'student-id',
+      fullName: 'Aluno',
+      responsibles: [{
+        id: newResponsibleId,
+        fullName: 'Nova responsável',
+        phone: '+5511988887777',
+        relationship: 'Avó',
+        notificationAuthorized: false,
+      }],
+    });
+
+    const lockedResponsiblesQuery = query.mock.calls.find(([sql]) =>
+      sql.includes('SELECT responsible_contacts.id'),
+    );
+    expect(lockedResponsiblesQuery?.[0]).not.toMatch(/count\s*\(\s*\*\s*\)\s*over/i);
+    expect(query.mock.calls.some(([sql]) => sql.includes('INSERT INTO student_responsibles'))).toBe(true);
+    const auditCall = query.mock.calls.find(([sql]) => sql.includes('INSERT INTO audit_logs'));
+    expect(auditCall?.[1]?.[3]).toContain('"added":1');
+    const responsibleLinkCall = query.mock.calls.find(([sql]) =>
+      sql.includes('INSERT INTO student_responsibles'),
+    );
+    expect(responsibleLinkCall?.[0]).toContain('CASE WHEN $5 THEN $6::uuid ELSE NULL END');
+  });
+
   it('rejects a responsible from another student and invalid phone data', async () => {
     const { service, transaction } = makeService(async (sql) => {
       if (sql.includes('SELECT full_name FROM students')) {
@@ -245,7 +298,10 @@ describe('ProfilesService', () => {
   it('limits teacher profiles to assigned classes and hides responsible contact details', async () => {
     const { service, query } = makeService(async (sql) => {
       if (sql.includes('FROM students') && sql.includes('WHERE students.school_id')) {
-        return { rows: [{ id: 'student-id' }], rowCount: 1 };
+        return {
+          rows: [{ id: 'student-id', schoolName: 'Escola de teste' }],
+          rowCount: 1,
+        };
       }
       return { rows: [], rowCount: 0 };
     });
@@ -259,6 +315,7 @@ describe('ProfilesService', () => {
 
     expect(profile.responsibles).toEqual([]);
     expect(profile.responsiblesRestricted).toBe(true);
+    expect(profile.student.schoolName).toBe('Escola de teste');
     for (const [sql] of query.mock.calls) {
       if (
         sql.includes('FROM student_enrollments') ||
@@ -283,6 +340,7 @@ describe('ProfilesService', () => {
             id: 'teacher-id',
             displayName: 'Professora de teste',
             email: 'teacher@example.test',
+            schoolName: 'Escola de teste',
             createdAt: new Date('2026-01-01T10:00:00.000Z'),
             isActive: false,
             hasPhoto: true,
@@ -300,11 +358,13 @@ describe('ProfilesService', () => {
 
     expect(profile.teacher).toMatchObject({
       displayName: 'Professora de teste',
+      schoolName: 'Escola de teste',
       isActive: false,
       hasPhoto: true,
     });
     expect(profile.studentsCount).toBe(17);
     expect(query).toHaveBeenCalledTimes(6);
+    expect(query.mock.calls[0][0]).toContain('JOIN schools ON schools.id = school_memberships.school_id');
     const assessmentQuery = query.mock.calls.find(([sql]) => sql.includes('FROM assessments'));
     const studentCountQuery = query.mock.calls.find(([sql]) => sql.includes('FROM student_enrollments'));
     const eventQuery = query.mock.calls.find(([sql]) => sql.includes('FROM school_events'));

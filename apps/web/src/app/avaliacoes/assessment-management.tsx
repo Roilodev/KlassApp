@@ -175,34 +175,6 @@ export function AssessmentManagement({
 
   return (
     <>
-      <section className="class-panel student-create-panel" aria-labelledby="assessment-create-heading">
-        <div className="student-create-copy">
-          <div className="setup-icon" aria-hidden="true">✎</div>
-          <div>
-            <p className="card-kicker">ROTINA DE APRENDIZAGEM</p>
-            <h2 id="assessment-create-heading">Avaliações</h2>
-            <p>Crie avaliações e acompanhe os resultados das turmas.</p>
-          </div>
-        </div>
-        <button
-          className="class-submit student-create-button"
-          disabled={classes.length === 0}
-          onClick={() => {
-            setError("");
-            setMessage("");
-            setIsFormOpen(true);
-          }}
-          type="button"
-        >
-          + Nova avaliação
-        </button>
-        {classes.length === 0 && (
-          <p className="student-create-hint">Nenhuma turma disponível para criar avaliações.</p>
-        )}
-        {error && <p className="form-message form-error" role="alert">{error}</p>}
-        {message && <p className="form-message form-success" role="status">{message}</p>}
-      </section>
-
       {isFormOpen && (
         <EntryFormDialog
           description="Defina a turma, a disciplina e a pontuação máxima. Você escolhe a escala de pontos."
@@ -284,8 +256,27 @@ export function AssessmentManagement({
             <p className="card-kicker">ACOMPANHAMENTO ESCOLAR</p>
             <h2 id="assessments-title">Avaliações cadastradas</h2>
           </div>
-          <span className="class-count">{assessments.length}</span>
+          <div className="class-list-actions">
+            <button
+              className="class-submit"
+              disabled={classes.length === 0}
+              onClick={() => {
+                setError("");
+                setMessage("");
+                setIsFormOpen(true);
+              }}
+              type="button"
+            >
+              Nova avaliação
+            </button>
+            <span className="class-count">{assessments.length}</span>
+          </div>
         </div>
+        {classes.length === 0 && (
+          <p className="student-create-hint">Nenhuma turma disponível para criar avaliações.</p>
+        )}
+        {error && <p className="form-message form-error" role="alert">{error}</p>}
+        {message && <p className="form-message form-success" role="status">{message}</p>}
         {assessments.length === 0 ? (
           <div className="empty-classes">
             <span aria-hidden="true">✿</span>

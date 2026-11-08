@@ -186,30 +186,6 @@ export function ScheduleManagement({
 
   return (
     <>
-      <section className="class-panel student-create-panel" aria-labelledby="schedule-create-heading">
-        <div className="student-create-copy">
-          <div className="setup-icon" aria-hidden="true">◷</div>
-          <div>
-            <p className="card-kicker">ROTINA DA TURMA</p>
-            <h2 id="schedule-create-heading">Horários semanais</h2>
-            <p>Organize aulas por turma, disciplina, dia e professor.</p>
-          </div>
-        </div>
-        <button
-          className="class-submit student-create-button"
-          disabled={classes.length === 0}
-          onClick={startNewSchedule}
-          type="button"
-        >
-          + Novo horário
-        </button>
-        {classes.length === 0 && (
-          <p className="student-create-hint">Cadastre uma turma antes de criar horários. <Link href="/turmas">Ir para Turmas</Link></p>
-        )}
-        {error && <p className="form-message form-error" role="alert">{error}</p>}
-        {message && <p className="form-message form-success" role="status">{message}</p>}
-      </section>
-
       {isFormOpen && (
         <EntryFormDialog
           description="Os horários se repetem toda semana e não podem se sobrepor na mesma turma ou para o mesmo professor."
@@ -350,8 +326,25 @@ export function ScheduleManagement({
             <p className="card-kicker">SEMANA ESCOLAR</p>
             <h2 id="schedule-list-title">Horários cadastrados</h2>
           </div>
-          <span className="class-count">{schedules.length}</span>
+          <div className="class-list-actions">
+            <button
+              className="class-submit"
+              disabled={classes.length === 0}
+              onClick={startNewSchedule}
+              type="button"
+            >
+              Novo horário
+            </button>
+            <span className="class-count">{schedules.length}</span>
+          </div>
         </div>
+        {classes.length === 0 && (
+          <p className="student-create-hint">
+            Cadastre uma turma antes de criar horários. <Link href="/turmas">Ir para Turmas</Link>
+          </p>
+        )}
+        {error && <p className="form-message form-error" role="alert">{error}</p>}
+        {message && <p className="form-message form-success" role="status">{message}</p>}
         {schedules.length === 0 ? (
           <div className="empty-classes">
             <span aria-hidden="true">☀</span>

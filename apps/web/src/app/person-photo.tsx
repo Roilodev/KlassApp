@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const maxPhotoBytes = 5 * 1024 * 1024;
@@ -126,6 +127,7 @@ interface PersonPhotoProps {
   personId: string;
   personName: string;
   editable: boolean;
+  actionsTarget?: HTMLElement | null;
 }
 
 export function PersonPhoto({
@@ -133,6 +135,7 @@ export function PersonPhoto({
   personId,
   personName,
   editable,
+  actionsTarget = null,
 }: PersonPhotoProps) {
   const [imageUrl, setImageUrl] = useState("");
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -140,12 +143,14 @@ export function PersonPhoto({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [photoAuthorizationConfirmed, setPhotoAuthorizationConfirmed] = useState(false);
+  const [authorizationChecked, setAuthorizationChecked] = useState(false);
+  const [pendingPhotoAction, setPendingPhotoAction] = useState<"camera" | "upload" | null>(null);
+  const [showUploadHelp, setShowUploadHelp] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const imageUrlRef = useRef("");
   const photoLoadRef = useRef<AbortController | null>(null);
   const photoUrl = `${apiUrl}/${kind}/${personId}/photo`;
-  const requiresAuthorization = kind === "students" && !photoAuthorizationConfirmed;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -217,6 +222,33 @@ export function PersonPhoto({
     }
   }
 
+  function requestPhotoAction(action: "camera" | "upload") {
+    setError("");
+    setShowUploadHelp(action === "upload");
+    if (kind === "students" && !photoAuthorizationConfirmed) {
+      setPendingPhotoAction(action);
+      setAuthorizationChecked(false);
+      return;
+    }
+    if (action === "camera") void startCamera();
+    else fileRef.current?.click();
+  }
+
+  function confirmPhotoAuthorization() {
+    if (!authorizationChecked || !pendingPhotoAction) return;
+    const action = pendingPhotoAction;
+    setPhotoAuthorizationConfirmed(true);
+    setPendingPhotoAction(null);
+    setAuthorizationChecked(false);
+    if (action === "camera") void startCamera();
+    else fileRef.current?.click();
+  }
+
+  function cancelPhotoAuthorization() {
+    setPendingPhotoAction(null);
+    setAuthorizationChecked(false);
+  }
+
   function closeCamera() {
     setCameraOpen(false);
     setStream(null);
@@ -278,6 +310,7 @@ export function PersonPhoto({
         );
       }
       replacePhotoUrl(URL.createObjectURL(optimizedPhoto));
+      setShowUploadHelp(false);
       window.dispatchEvent(new CustomEvent<PersonPhotoUpdatedDetail>(
         "klassapp:person-photo-updated",
         { detail: { kind, personId, hasPhoto: true } },
@@ -315,6 +348,7 @@ export function PersonPhoto({
 
   async function deletePhoto() {
     setError("");
+    setShowUploadHelp(false);
     setBusy(true);
     try {
       const response = await fetch(photoUrl, {
@@ -342,6 +376,70 @@ export function PersonPhoto({
     setImageUrl(url);
   }
 
+  const photoActions = editable && !cameraOpen ? (
+    <div
+      className={`person-photo-actions${actionsTarget ? " person-photo-actions-footer" : ""}`}
+      aria-label="Ações da foto"
+      role="group"
+    >
+      {actionsTarget && <span className="person-photo-actions-label">Foto</span>}
+      <input
+        accept="image/jpeg,image/png,image/webp"
+        disabled={busy}
+        hidden
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) void uploadPhoto(file);
+          event.target.value = "";
+        }}
+        ref={fileRef}
+        type="file"
+      />
+      <button
+        aria-label="Usar webcam"
+        disabled={busy}
+        onClick={() => requestPhotoAction("camera")}
+        title="Usar webcam"
+        type="button"
+      >
+        <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+          <path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h8A1.5 1.5 0 0 1 15 8.5v7a1.5 1.5 0 0 1-1.5 1.5h-8A1.5 1.5 0 0 1 4 15.5v-7Z" />
+          <path d="m15 10 5-2v8l-5-2" />
+        </svg>
+        {actionsTarget && <span>Webcam</span>}
+      </button>
+      <button
+        aria-label="Enviar foto"
+        disabled={busy}
+        onClick={() => requestPhotoAction("upload")}
+        title="Enviar foto"
+        type="button"
+      >
+        <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+          <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5" />
+          <path d="M5 14.5v3A1.5 1.5 0 0 0 6.5 19h11a1.5 1.5 0 0 0 1.5-1.5v-3" />
+        </svg>
+        {actionsTarget && <span>Subir foto</span>}
+      </button>
+      {imageUrl && (
+        <button
+          aria-label="Remover foto"
+          disabled={busy}
+          onClick={() => void deletePhoto()}
+          title="Remover foto"
+          type="button"
+        >
+          <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+            <path d="M4 7h16" />
+            <path d="M10 11v6m4-6v6" />
+            <path d="m5 7 1 13h12l1-13M9 7V4h6v3" />
+          </svg>
+          {actionsTarget && <span>Remover foto</span>}
+        </button>
+      )}
+    </div>
+  ) : null;
+
   return (
     <div className="person-photo">
       <div className="person-photo-frame">
@@ -354,57 +452,48 @@ export function PersonPhoto({
         ) : (
           <span aria-hidden="true">{personName.trim().charAt(0).toUpperCase() || "?"}</span>
         )}
+        {!actionsTarget && photoActions}
       </div>
-      {editable && (
-        <div className="person-photo-actions">
-          <input
-            accept="image/jpeg,image/png,image/webp"
-            disabled={busy || requiresAuthorization}
-            hidden
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void uploadPhoto(file);
-              event.target.value = "";
-            }}
-            ref={fileRef}
-            type="file"
-          />
-          <button disabled={busy || requiresAuthorization} onClick={() => void startCamera()} type="button">
-            Usar webcam
-          </button>
-          <button disabled={busy || requiresAuthorization} onClick={() => fileRef.current?.click()} type="button">
-            Enviar foto
-          </button>
-          {imageUrl && (
-            <button disabled={busy} onClick={() => void deletePhoto()} type="button">
-              Remover foto
+      {actionsTarget && photoActions && createPortal(photoActions, actionsTarget)}
+      {pendingPhotoAction && (
+        <div className="photo-authorization-prompt" aria-live="polite">
+          <label className="photo-authorization">
+            <input
+              checked={authorizationChecked}
+              onChange={(event) => setAuthorizationChecked(event.target.checked)}
+              type="checkbox"
+            />
+            <span>Confirmo que a escola possui autorização documentada do responsável para armazenar esta imagem.</span>
+          </label>
+          <div className="photo-authorization-actions">
+            <button
+              disabled={!authorizationChecked}
+              onClick={confirmPhotoAuthorization}
+              type="button"
+            >
+              Confirmar
             </button>
-          )}
+            <button onClick={cancelPhotoAuthorization} type="button">
+              Cancelar
+            </button>
+          </div>
         </div>
-      )}
-      {editable && kind === "students" && (
-        <label className="photo-authorization">
-          <input
-            checked={photoAuthorizationConfirmed}
-            onChange={(event) => setPhotoAuthorizationConfirmed(event.target.checked)}
-            type="checkbox"
-          />
-          <span>Confirmo que a escola possui autorização documentada do responsável para armazenar esta imagem.</span>
-        </label>
       )}
       {cameraOpen && (
         <div className="camera-capture">
           <div>
-            <button disabled={busy || requiresAuthorization} onClick={capturePhoto} type="button">
+            <button disabled={busy} onClick={capturePhoto} type="button">
               {busy ? "Salvando..." : "Capturar foto"}
             </button>
             <button disabled={busy} onClick={closeCamera} type="button">Cancelar</button>
           </div>
         </div>
       )}
-      <p className="person-photo-help">
-        {editable ? "JPEG, PNG ou WebP · até 5 MB" : "Foto de perfil"}
-      </p>
+      {showUploadHelp && (
+        <p className="person-photo-help" role="status">
+          JPEG, PNG ou WebP · até 5 MB
+        </p>
+      )}
       {error && <p className="form-message form-error" role="alert">{error}</p>}
     </div>
   );

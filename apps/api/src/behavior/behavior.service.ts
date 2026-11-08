@@ -39,6 +39,10 @@ export interface BehaviorStudent {
   fullName: string;
 }
 
+export interface BehaviorStudentSearchResult extends BehaviorStudent {
+  classLabel: string;
+}
+
 export interface BehaviorRecord {
   id: string;
   enrollmentId: string;
@@ -164,6 +168,70 @@ export class BehaviorService {
       [schoolId, classId, userId, role],
     );
     return result.rows;
+  }
+
+  async searchStudents(
+    schoolId: string,
+    userId: string,
+    role: SchoolRole,
+    query: string,
+  ): Promise<BehaviorStudentSearchResult[]> {
+    const search = typeof query === 'string' ? query.trim() : '';
+    if (search.length < 2 || search.length > 100) {
+      throw new BadRequestException('A busca deve conter entre 2 e 100 caracteres.');
+    }
+
+    const result = await this.database.query<{
+      id: string;
+      enrollmentId: string;
+      fullName: string;
+      grade: string;
+      className: string;
+      year: number;
+    }>(
+      `SELECT students.id, student_enrollments.id AS "enrollmentId",
+              students.full_name AS "fullName",
+              grades.name AS grade, classes.name AS "className",
+              academic_years.year
+       FROM student_enrollments
+       JOIN students
+         ON students.school_id = student_enrollments.school_id
+        AND students.id = student_enrollments.student_id
+       JOIN classes
+         ON classes.school_id = student_enrollments.school_id
+        AND classes.id = student_enrollments.class_id
+       JOIN grades
+         ON grades.school_id = classes.school_id
+        AND grades.id = classes.grade_id
+       JOIN academic_years
+         ON academic_years.school_id = classes.school_id
+        AND academic_years.id = classes.academic_year_id
+       WHERE student_enrollments.school_id = $1
+         AND student_enrollments.status = 'active'
+         AND (
+           students.full_name ILIKE '%' || $2 || '%'
+           OR grades.name ILIKE '%' || $2 || '%'
+           OR classes.name ILIKE '%' || $2 || '%'
+           OR grades.name || ' · Turma ' || classes.name ILIKE '%' || $2 || '%'
+           OR academic_years.year::text ILIKE '%' || $2 || '%'
+         )
+         AND ($4::text = 'admin' OR EXISTS (
+           SELECT 1 FROM teacher_class_assignments
+           WHERE teacher_class_assignments.school_id = classes.school_id
+             AND teacher_class_assignments.class_id = classes.id
+             AND teacher_class_assignments.user_id = $3
+         ))
+       ORDER BY students.full_name, academic_years.year DESC,
+                grades.name, classes.name
+       LIMIT 50`,
+      [schoolId, search, userId, role],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      enrollmentId: row.enrollmentId,
+      fullName: row.fullName,
+      classLabel: `${row.grade} · Turma ${row.className} · ${row.year}`,
+    }));
   }
 
   async listRecords(

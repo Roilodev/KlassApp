@@ -66,6 +66,9 @@ describe('AppController (e2e)', () => {
       .get('/behavior/classes/not-a-uuid/students')
       .expect(401);
     await request(app.getHttpServer())
+      .get('/behavior/students?q=student')
+      .expect(401);
+    await request(app.getHttpServer())
       .get('/behavior/students/not-a-uuid/records')
       .expect(401);
     await request(app.getHttpServer())

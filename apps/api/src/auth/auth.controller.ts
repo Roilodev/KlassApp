@@ -11,7 +11,7 @@ import {
 import type { Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import type { AuthenticatedRequest } from './auth.guard.js';
-import { AuthService } from './auth.service.js';
+import { AUTH_SESSION_DURATION_SECONDS, AuthService } from './auth.service.js';
 import { Public } from './public.decorator.js';
 
 interface LoginBody {
@@ -24,7 +24,7 @@ const cookieOptions = {
   secure: process.env.NODE_ENV === 'production',
   sameSite: 'strict' as const,
   path: '/',
-  maxAge: 15 * 60 * 1000,
+  maxAge: AUTH_SESSION_DURATION_SECONDS * 1000,
 };
 
 @Controller('auth')

@@ -156,35 +156,6 @@ export function TeacherManagement({
 
   return (
     <>
-      <section className="class-panel teacher-create-panel" aria-labelledby="teacher-create-heading">
-        <div className="student-create-copy">
-          <div className="setup-icon" aria-hidden="true">♙</div>
-          <div>
-            <p className="card-kicker">EQUIPE ESCOLAR</p>
-            <h2 id="teacher-create-heading">Novo professor</h2>
-            <p>Convide professores e escolha as turmas que poderão acessar.</p>
-          </div>
-        </div>
-        <button
-          className="class-submit student-create-button"
-          disabled={classes.length === 0}
-          onClick={() => {
-            setError("");
-            setMessage("");
-            setInvitationUrl("");
-            setIsFormOpen(true);
-          }}
-          type="button"
-        >
-          + Novo professor
-        </button>
-        {classes.length === 0 && (
-          <p className="student-create-hint">
-            Cadastre uma turma antes de convidar professores. <Link className="setup-link" href="/turmas">Ir para Turmas</Link>
-          </p>
-        )}
-      </section>
-
       {isFormOpen && (
         <div
           className="profile-backdrop"
@@ -308,10 +279,30 @@ export function TeacherManagement({
             <p className="card-kicker">EQUIPE DA ESCOLA</p>
             <h2 id="teachers-title">Professores cadastrados</h2>
           </div>
-          <span className="class-count" aria-label={`${teachers.length} professores`}>
-            {teachers.length}
-          </span>
+          <div className="class-list-actions">
+            <button
+              className="class-submit"
+              disabled={classes.length === 0}
+              onClick={() => {
+                setError("");
+                setMessage("");
+                setInvitationUrl("");
+                setIsFormOpen(true);
+              }}
+              type="button"
+            >
+              Novo professor
+            </button>
+            <span className="class-count" aria-label={`${teachers.length} professores`}>
+              {teachers.length}
+            </span>
+          </div>
         </div>
+        {classes.length === 0 && (
+          <p className="student-create-hint">
+            Cadastre uma turma antes de convidar professores. <Link className="setup-link" href="/turmas">Ir para Turmas</Link>
+          </p>
+        )}
         <label className="people-search">
           <span>Buscar professor</span>
           <input
