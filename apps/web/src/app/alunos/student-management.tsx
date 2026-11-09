@@ -5,7 +5,6 @@ import type { FormEvent } from "react";
 import Link from "next/link";
 import type { SchoolClass } from "../turmas/class-form";
 import { PersonProfile } from "../person-profile";
-import { PersonPhotoAvatar } from "../person-photo";
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const studentsPerPage = 25;
@@ -16,6 +15,10 @@ const studentCollator = new Intl.Collator("pt-BR", {
 
 function normalizeSearch(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+function formatRegistrationDate(value: string) {
+  return new Date(value).toLocaleDateString("pt-BR");
 }
 
 interface Responsible {
@@ -29,6 +32,7 @@ interface Responsible {
 interface Student {
   id: string;
   fullName: string;
+  createdAt: string;
   homeAddress: string;
   hasPhoto: boolean;
   isActive: boolean;
@@ -474,12 +478,17 @@ export function StudentManagement({
                     <th scope="col">N.º</th>
                     <th scope="col">Aluno</th>
                     <th scope="col">Responsável</th>
+                    <th scope="col">Estado</th>
+                    <th scope="col">Ações</th>
                   </tr>
                 </thead>
                 {studentGroups.map((group) => (
                   <tbody key={group.key}>
                     <tr className="student-table-group">
-                      <th colSpan={3} scope="rowgroup">{group.label}</th>
+                      <th colSpan={5} scope="rowgroup">
+                        <span>{group.label}</span>
+                        <small>{group.students.length} {group.students.length === 1 ? "aluno" : "alunos"}</small>
+                      </th>
                     </tr>
                     {group.students.map((student) => (
                       <tr key={student.id}>
@@ -490,35 +499,45 @@ export function StudentManagement({
                         </td>
                         <td>
                           <div className="student-table-person">
-                            <PersonPhotoAvatar
-                              hasPhoto={student.hasPhoto}
-                              kind="students"
-                              personId={student.id}
-                              personName={student.fullName}
-                            />
-                            <button
-                              className="student-name-button"
-                              onClick={() => setProfileStudent({ id: student.id, fullName: student.fullName })}
-                              type="button"
-                            >
-                              {student.fullName}
-                            </button>
-                            {!student.isActive && (
-                              <span className="student-leave-badge">BAIXA</span>
-                            )}
+                            <span className="student-table-person-copy">
+                              <strong className="student-table-name">
+                                {student.fullName}
+                              </strong>
+                              <small className="student-table-registration-date">
+                                Cadastro em {formatRegistrationDate(student.createdAt)}
+                              </small>
+                            </span>
                           </div>
                         </td>
                         <td>
                           {student.responsibles[0] ? (
                             <span className="student-table-contact">
-                              <span>{student.responsibles[0].fullName} · {student.responsibles[0].phone}</span>
-                              {student.responsibles.length > 1 && (
-                                <small>+ {student.responsibles.length - 1}</small>
-                              )}
+                              {student.responsibles.map((responsible) => (
+                                <span className="student-table-contact-person" key={responsible.id}>
+                                  <span className="student-table-contact-primary">{responsible.fullName}</span>
+                                  <span className="student-table-contact-secondary">
+                                    {[responsible.relationship, responsible.phone].filter(Boolean).join(" · ") || " "}
+                                  </span>
+                                </span>
+                              ))}
                             </span>
                           ) : (
                             <span className="student-table-muted">Não informado</span>
                           )}
+                        </td>
+                        <td>
+                          <span className={`student-status-badge ${student.isActive ? "is-active" : "is-inactive"}`}>
+                            {student.isActive ? "Ativo" : "Baja"}
+                          </span>
+                        </td>
+                        <td className="student-table-row-actions-cell">
+                          <button
+                            className="student-table-row-action"
+                            onClick={() => setProfileStudent({ id: student.id, fullName: student.fullName })}
+                            type="button"
+                          >
+                            Ver ficha
+                          </button>
                         </td>
                       </tr>
                     ))}

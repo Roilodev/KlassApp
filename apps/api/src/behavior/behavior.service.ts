@@ -26,6 +26,12 @@ export interface CreateBehaviorRecordInput {
   occurredOn: string;
 }
 
+export interface UpdateBehaviorRecordInput {
+  category: BehaviorCategory;
+  description: string;
+  occurredOn: string;
+}
+
 export interface BehaviorClass {
   id: string;
   year: number;
@@ -414,6 +420,157 @@ export class BehaviorService {
         throw new Error('A observação salva não pôde ser carregada.');
       }
       return mapRecord(row);
+    });
+  }
+
+  async update(
+    schoolId: string,
+    userId: string,
+    role: SchoolRole,
+    recordId: string,
+    input: UpdateBehaviorRecordInput,
+  ): Promise<BehaviorRecord> {
+    if (!UUID_PATTERN.test(recordId)) {
+      throw new BadRequestException('Observação inválida.');
+    }
+    if (
+      !input ||
+      typeof input !== 'object' ||
+      typeof input.category !== 'string' ||
+      typeof input.description !== 'string' ||
+      typeof input.occurredOn !== 'string'
+    ) {
+      throw new BadRequestException('Informe os dados da observação.');
+    }
+    const description = input.description.trim();
+    if (!CATEGORIES.includes(input.category as BehaviorCategory)) {
+      throw new BadRequestException('Selecione uma categoria válida.');
+    }
+    if (description.length < 1 || description.length > 1200) {
+      throw new BadRequestException('A observação deve ter entre 1 e 1200 caracteres.');
+    }
+    if (!isValidDate(input.occurredOn)) {
+      throw new BadRequestException('Informe uma data válida para a observação.');
+    }
+
+    return this.database.transaction(async (client) => {
+      const updated = await client.query<{ student_id: string }>(
+        `UPDATE behavior_records
+         SET category = $3, description = $4, occurred_on = $5::date
+         WHERE school_id = $1 AND id = $2
+           AND ($6::text = 'admin' OR EXISTS (
+             SELECT 1 FROM teacher_class_assignments
+             WHERE teacher_class_assignments.school_id = behavior_records.school_id
+               AND teacher_class_assignments.class_id = behavior_records.class_id
+               AND teacher_class_assignments.user_id = $7
+           ))
+         RETURNING student_id`,
+        [
+          schoolId,
+          recordId,
+          input.category,
+          description,
+          input.occurredOn,
+          role,
+          userId,
+        ],
+      );
+      const studentId = updated.rows[0]?.student_id;
+      if (!studentId) {
+        throw new NotFoundException('A observação não foi encontrada ou a turma não está atribuída a você.');
+      }
+
+      await client.query(
+        `INSERT INTO audit_logs (school_id, actor_id, action, entity_type, entity_id, details)
+         VALUES ($1, $2, 'behavior.record_updated', 'student', $3, $4::jsonb)`,
+        [
+          schoolId,
+          userId,
+          studentId,
+          JSON.stringify({
+            recordId,
+            category: input.category,
+            occurredOn: input.occurredOn,
+          }),
+        ],
+      );
+
+      const saved = await client.query<BehaviorRow>(
+        `SELECT behavior_records.id, behavior_records.enrollment_id,
+                behavior_records.student_id, students.full_name AS student_name,
+                behavior_records.class_id,
+                grades.name || ' · Turma ' || classes.name AS class_label,
+                behavior_records.category, behavior_records.description,
+                behavior_records.occurred_on::text AS occurred_on,
+                users.display_name AS recorded_by, behavior_records.created_at
+         FROM behavior_records
+         JOIN students
+           ON students.school_id = behavior_records.school_id
+          AND students.id = behavior_records.student_id
+         JOIN classes
+           ON classes.school_id = behavior_records.school_id
+          AND classes.id = behavior_records.class_id
+         JOIN grades
+           ON grades.school_id = classes.school_id
+          AND grades.id = classes.grade_id
+         JOIN users ON users.id = behavior_records.created_by
+         WHERE behavior_records.school_id = $1 AND behavior_records.id = $2`,
+        [schoolId, recordId],
+      );
+      const row = saved.rows[0];
+      if (!row) {
+        throw new Error('A observação atualizada não pôde ser carregada.');
+      }
+      return mapRecord(row);
+    });
+  }
+
+  async remove(
+    schoolId: string,
+    userId: string,
+    role: SchoolRole,
+    recordId: string,
+  ): Promise<void> {
+    if (!UUID_PATTERN.test(recordId)) {
+      throw new BadRequestException('Observação inválida.');
+    }
+
+    await this.database.transaction(async (client) => {
+      const removed = await client.query<{
+        student_id: string;
+        category: BehaviorCategory;
+        occurred_on: string;
+      }>(
+        `DELETE FROM behavior_records
+         WHERE school_id = $1 AND id = $2
+           AND ($3::text = 'admin' OR EXISTS (
+             SELECT 1 FROM teacher_class_assignments
+             WHERE teacher_class_assignments.school_id = behavior_records.school_id
+               AND teacher_class_assignments.class_id = behavior_records.class_id
+               AND teacher_class_assignments.user_id = $4
+           ))
+         RETURNING student_id, category, occurred_on::text AS occurred_on`,
+        [schoolId, recordId, role, userId],
+      );
+      const record = removed.rows[0];
+      if (!record) {
+        throw new NotFoundException('A observação não foi encontrada ou a turma não está atribuída a você.');
+      }
+
+      await client.query(
+        `INSERT INTO audit_logs (school_id, actor_id, action, entity_type, entity_id, details)
+         VALUES ($1, $2, 'behavior.record_deleted', 'student', $3, $4::jsonb)`,
+        [
+          schoolId,
+          userId,
+          record.student_id,
+          JSON.stringify({
+            recordId,
+            category: record.category,
+            occurredOn: record.occurred_on,
+          }),
+        ],
+      );
     });
   }
 }

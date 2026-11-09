@@ -90,8 +90,11 @@ export function BehaviorManagement({ classes, canEditPhoto }: BehaviorManagement
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [recordsError, setRecordsError] = useState("");
+  const [recordActionError, setRecordActionError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
+  const [deletingRecordId, setDeletingRecordId] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [showStudentProfile, setShowStudentProfile] = useState(false);
@@ -148,6 +151,7 @@ export function BehaviorManagement({ classes, canEditPhoto }: BehaviorManagement
     async function loadRecords() {
       setLoadingRecords(true);
       setRecordsError("");
+      setRecordActionError("");
       try {
         const response = await fetch(`${apiUrl}/behavior/students/${studentId}/records`, {
           credentials: "include",
@@ -173,10 +177,39 @@ export function BehaviorManagement({ classes, canEditPhoto }: BehaviorManagement
     return () => controller.abort();
   }, [studentId, selectedEnrollmentId]);
 
-  async function addRecord(event: FormEvent<HTMLFormElement>) {
+  function openNewRecord() {
+    setEditingRecordId(null);
+    setOccurredOn(localDateValue());
+    setCategory("participation");
+    setDescription("");
+    setError("");
+    setMessage("");
+    setIsFormOpen(true);
+  }
+
+  function editRecord(record: BehaviorRecord) {
+    setEditingRecordId(record.id);
+    setOccurredOn(record.occurredOn.slice(0, 10));
+    setCategory(record.category);
+    setDescription(record.description);
+    setError("");
+    setMessage("");
+    setIsFormOpen(true);
+  }
+
+  async function saveRecord(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const student = selectedStudent;
-    if (!student) {
+    if (!student && !editingRecordId) {
+      setError("Selecione um aluno com matrícula ativa.");
+      return;
+    }
+    const body = editingRecordId
+      ? { category, description, occurredOn }
+      : student
+        ? { enrollmentId: student.enrollmentId, category, description, occurredOn }
+        : null;
+    if (!body) {
       setError("Selecione um aluno com matrícula ativa.");
       return;
     }
@@ -184,30 +217,60 @@ export function BehaviorManagement({ classes, canEditPhoto }: BehaviorManagement
     setMessage("");
     setSubmitting(true);
     try {
-      const response = await fetch(`${apiUrl}/behavior/records`, {
-        method: "POST",
+      const response = await fetch(
+        `${apiUrl}/behavior/records${editingRecordId ? `/${editingRecordId}` : ""}`,
+        {
+        method: editingRecordId ? "PATCH" : "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          enrollmentId: student.enrollmentId,
-          category,
-          description,
-          occurredOn,
-        }),
-      });
+        body: JSON.stringify(body),
+        },
+      );
       if (!response.ok) {
-        await showRequestError(response, setError, "Não foi possível salvar o registro.");
+        await showRequestError(response, setError, "Não foi possível salvar a observação.");
         return;
       }
-      const created = await response.json() as BehaviorRecord;
-      setRecords((current) => sortBehaviorRecords([created, ...current]));
+      const saved = await response.json() as BehaviorRecord;
+      const wasEditing = Boolean(editingRecordId);
+      setRecords((current) => sortBehaviorRecords([
+        ...current.filter((record) => record.id !== saved.id),
+        saved,
+      ]));
+      setEditingRecordId(null);
       setDescription("");
       setIsFormOpen(false);
-      setMessage("Registro adicionado ao histórico do estudante.");
+      setMessage(wasEditing
+        ? "Observação atualizada."
+        : "Registro adicionado ao histórico do estudante.");
     } catch {
       setError("Não foi possível conectar à KlassApp. Verifique se a API está iniciada.");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function deleteRecord(record: BehaviorRecord) {
+    if (!window.confirm("Excluir esta observação do histórico? Esta ação não pode ser desfeita.")) {
+      return;
+    }
+    setRecordActionError("");
+    setMessage("");
+    setDeletingRecordId(record.id);
+    try {
+      const response = await fetch(`${apiUrl}/behavior/records/${record.id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!response.ok) {
+        await showRequestError(response, setRecordActionError, "Não foi possível excluir a observação.");
+        return;
+      }
+      setRecords((current) => current.filter((item) => item.id !== record.id));
+      setMessage("Observação excluída.");
+    } catch {
+      setRecordActionError("Não foi possível conectar à KlassApp. Verifique se a API está iniciada.");
+    } finally {
+      setDeletingRecordId("");
     }
   }
 
@@ -304,7 +367,7 @@ export function BehaviorManagement({ classes, canEditPhoto }: BehaviorManagement
           icon="♡"
           isBusy={submitting}
           onClose={() => setIsFormOpen(false)}
-          title="Registre uma observação"
+          title={editingRecordId ? "Edite a observação" : "Registre uma observação"}
           titleId="create-behavior-title"
         >
           {selectedStudent && (
@@ -312,7 +375,7 @@ export function BehaviorManagement({ classes, canEditPhoto }: BehaviorManagement
               Aluno: <strong>{selectedStudent.fullName}</strong> · {selectedStudent.classLabel}
             </p>
           )}
-          <form className="behavior-form" onSubmit={addRecord}>
+          <form className="behavior-form" onSubmit={saveRecord}>
             <label>
               Data do fato
               <input
@@ -351,13 +414,23 @@ export function BehaviorManagement({ classes, canEditPhoto }: BehaviorManagement
             <div className="dialog-form-actions">
               <button
                 className="class-submit behavior-submit"
-                disabled={submitting || !studentId}
+                disabled={submitting || (!studentId && !editingRecordId)}
                 type="submit"
               >
-                {submitting ? "Salvando..." : "Adicionar ao histórico"}
+                {submitting
+                  ? "Salvando..."
+                  : editingRecordId ? "Salvar alterações" : "Adicionar ao histórico"}
               </button>
-              <button className="class-cancel-edit" disabled={submitting} onClick={() => setIsFormOpen(false)} type="button">
-                Fechar
+              <button
+                className="class-cancel-edit"
+                disabled={submitting}
+                onClick={() => {
+                  setIsFormOpen(false);
+                  setEditingRecordId(null);
+                }}
+                type="button"
+              >
+                Cancelar
               </button>
             </div>
           </form>
@@ -377,11 +450,7 @@ export function BehaviorManagement({ classes, canEditPhoto }: BehaviorManagement
             <button
               className="class-submit behavior-create-button"
               disabled={!studentId}
-              onClick={() => {
-                setError("");
-                setMessage("");
-                setIsFormOpen(true);
-              }}
+              onClick={openNewRecord}
               type="button"
             >
               Nova observação
@@ -401,6 +470,7 @@ export function BehaviorManagement({ classes, canEditPhoto }: BehaviorManagement
           </div>
         </div>
         {message && <p className="form-message form-success" role="status">{message}</p>}
+        {recordActionError && <p className="form-message form-error" role="alert">{recordActionError}</p>}
         {!studentId ? (
           <div className="empty-classes">
             <span aria-hidden="true">✿</span>
@@ -429,6 +499,24 @@ export function BehaviorManagement({ classes, canEditPhoto }: BehaviorManagement
                   </div>
                   <p>{record.description}</p>
                   <small>{record.classLabel} · Registrado por {record.recordedBy}</small>
+                  <div className="behavior-record-actions">
+                    <button
+                      className="behavior-record-edit dialog-edit-button"
+                      disabled={Boolean(deletingRecordId)}
+                      onClick={() => editRecord(record)}
+                      type="button"
+                    >
+                      Editar
+                    </button>
+                    <button
+                      className="behavior-record-delete"
+                      disabled={Boolean(deletingRecordId)}
+                      onClick={() => void deleteRecord(record)}
+                      type="button"
+                    >
+                      {deletingRecordId === record.id ? "Excluindo..." : "Excluir"}
+                    </button>
+                  </div>
                 </div>
               </li>
             ))}

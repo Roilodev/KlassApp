@@ -58,6 +58,13 @@ interface SetupProgressItem {
   ready: boolean;
 }
 
+interface DashboardObservation {
+  type: string;
+  title: string;
+  href: string;
+  items: string[];
+}
+
 async function getDashboardSummary(headers: { cookie: string }): Promise<DashboardSummary> {
   const response = await fetch(`${apiUrl}/dashboard/summary`, {
     headers,
@@ -84,6 +91,22 @@ async function getNextEvent(headers: { cookie: string }): Promise<NextEvent | nu
     throw new Error("Não foi possível carregar o próximo evento.");
   }
   return response.json() as Promise<NextEvent | null>;
+}
+
+async function getDashboardObservations(
+  headers: { cookie: string },
+): Promise<DashboardObservation[]> {
+  const response = await fetch(`${apiUrl}/dashboard/observations`, {
+    headers,
+    cache: "no-store",
+  });
+  if (response.status === 401 || response.status === 403) {
+    redirect("/login");
+  }
+  if (!response.ok) {
+    throw new Error("Não foi possível carregar as observações da escola.");
+  }
+  return response.json() as Promise<DashboardObservation[]>;
 }
 
 function formatNextEventDate(event: NextEvent): string {
@@ -148,9 +171,12 @@ async function Dashboard() {
   const session = await getSession();
   const cookieStore = await cookies();
   const headers = { cookie: cookieStore.toString() };
-  const [summary, nextEvent] = await Promise.all([
+  const [summary, nextEvent, observations] = await Promise.all([
     getDashboardSummary(headers),
     getNextEvent(headers),
+    session.school.role === "admin"
+      ? getDashboardObservations(headers)
+      : Promise.resolve([]),
   ]);
   const setupItems = session.school.role === "admin"
     ? getSetupProgress(summary)
@@ -407,6 +433,49 @@ async function Dashboard() {
                 </Link>
               )}
             </div>
+          </section>
+        )}
+
+        {session.school.role === "admin" && (
+          <section className="dashboard-observations" aria-labelledby="dashboard-observations-title">
+            <div className="dashboard-observations-heading">
+              <span className="dashboard-observations-icon" aria-hidden="true">!</span>
+              <div>
+                <h2 id="dashboard-observations-title">Observações</h2>
+              </div>
+              <span className="dashboard-observations-count">
+                {observations.reduce((count, observation) => count + observation.items.length, 0)}
+              </span>
+            </div>
+            {observations.length === 0 ? (
+              <p className="dashboard-observations-empty">
+                Tudo em ordem. Não há itens que precisem de atenção agora.
+              </p>
+            ) : (
+              <div className="dashboard-observation-grid">
+                {observations.map((observation) => (
+                  <article className="dashboard-observation" key={observation.type}>
+                    <div className="dashboard-observation-title">
+                      <h3>{observation.title}</h3>
+                      <span>{observation.items.length}</span>
+                    </div>
+                    <ul>
+                      {observation.items.slice(0, 5).map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                    {observation.items.length > 5 && (
+                      <p className="dashboard-observation-more">
+                        E mais {observation.items.length - 5} itens.
+                      </p>
+                    )}
+                    <Link href={observation.href}>
+                      Ver registros <span aria-hidden="true">→</span>
+                    </Link>
+                  </article>
+                ))}
+              </div>
+            )}
           </section>
         )}
 

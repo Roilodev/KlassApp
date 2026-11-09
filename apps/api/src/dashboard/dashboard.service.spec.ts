@@ -74,4 +74,63 @@ describe('DashboardService', () => {
       ['school-id', 'teacher-id', 'teacher'],
     );
   });
+
+  it('groups administrative observations by issue and omits empty categories', async () => {
+    const query = vi.fn(async () => ({
+      rows: [
+        { type: 'classes-without-schedules', item: '4º ano · Turma A (2026)' },
+        { type: 'classes-without-students', item: '3º ano · Turma B (2026)' },
+        { type: 'classes-without-teachers', item: '5º ano · Turma C (2026)' },
+        { type: 'subjects-without-teachers', item: 'Ciências' },
+        { type: 'subjects-without-teachers', item: 'História' },
+        { type: 'students-without-responsible', item: 'Estudante de teste' },
+      ],
+      rowCount: 6,
+    }));
+    const service = new DashboardService({ query } as unknown as DatabaseService);
+
+    await expect(service.getObservations('school-id')).resolves.toEqual([
+      {
+        type: 'subjects-without-teachers',
+        title: 'Matérias sem professor',
+        href: '/materias',
+        items: ['Ciências', 'História'],
+      },
+      {
+        type: 'classes-without-students',
+        title: 'Turmas sem alunos',
+        href: '/turmas',
+        items: ['3º ano · Turma B (2026)'],
+      },
+      {
+        type: 'classes-without-schedules',
+        title: 'Turmas sem horário definido',
+        href: '/horarios',
+        items: ['4º ano · Turma A (2026)'],
+      },
+      {
+        type: 'classes-without-teachers',
+        title: 'Turmas sem professor',
+        href: '/professores',
+        items: ['5º ano · Turma C (2026)'],
+      },
+      {
+        type: 'students-without-responsible',
+        title: 'Alunos sem responsável',
+        href: '/alunos',
+        items: ['Estudante de teste'],
+      },
+    ]);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('teacher_subject_assignments'),
+      ['school-id'],
+    );
+  });
+
+  it('returns no observations when all school records are configured', async () => {
+    const query = vi.fn(async () => ({ rows: [], rowCount: 0 }));
+    const service = new DashboardService({ query } as unknown as DatabaseService);
+
+    await expect(service.getObservations('school-id')).resolves.toEqual([]);
+  });
 });

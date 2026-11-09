@@ -14,23 +14,6 @@ function normalizeSearch(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 }
 
-async function showRequestError(
-  response: Response,
-  setError: (message: string) => void,
-  fallback: string,
-) {
-  if (response.status === 401) {
-    setError("Sua sessão expirou. Entre novamente para continuar.");
-  } else if (response.status === 403) {
-    setError("Somente a administração pode alterar as matérias do professor.");
-  } else if (response.status === 429) {
-    setError("Muitas tentativas. Aguarde um momento e tente novamente.");
-  } else {
-    const result = await response.json().catch(() => null);
-    setError(typeof result?.message === "string" ? result.message : fallback);
-  }
-}
-
 interface Teacher {
   id: string;
   email: string;
@@ -60,9 +43,6 @@ export function TeacherManagement({
   const [teachers, setTeachers] = useState(initialTeachers);
   const [selectedClasses, setSelectedClasses] = useState<string[]>([]);
   const [selectedSubjectIds, setSelectedSubjectIds] = useState<string[]>([]);
-  const [subjectTeacher, setSubjectTeacher] = useState<Teacher | null>(null);
-  const [editingSubjectIds, setEditingSubjectIds] = useState<string[]>([]);
-  const [savingSubjects, setSavingSubjects] = useState(false);
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [phone, setPhone] = useState("");
@@ -203,37 +183,6 @@ export function TeacherManagement({
       setError("Não foi possível conectar à KlassApp. Verifique se a API está iniciada.");
     } finally {
       setSubmitting(false);
-    }
-  }
-
-  async function saveTeacherSubjects(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!subjectTeacher) return;
-    setError("");
-    setMessage("");
-    setSavingSubjects(true);
-    try {
-      const response = await fetch(`${apiUrl}/teachers/${subjectTeacher.id}/subjects`, {
-        method: "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subjectIds: editingSubjectIds }),
-      });
-      if (!response.ok) {
-        await showRequestError(response, setError, "Não foi possível atualizar as matérias.");
-        return;
-      }
-      setTeachers((current) => current.map((teacher) =>
-        teacher.id === subjectTeacher.id
-          ? { ...teacher, subjectIds: editingSubjectIds }
-          : teacher,
-      ));
-      setSubjectTeacher(null);
-      setMessage("Matérias do professor atualizadas.");
-    } catch {
-      setError("Não foi possível conectar à KlassApp. Verifique se a API está iniciada.");
-    } finally {
-      setSavingSubjects(false);
     }
   }
 
@@ -594,8 +543,23 @@ export function TeacherManagement({
                   )}
                   <span className="class-list-copy teacher-list-copy">
                     <strong>{teacher.displayName}</strong>
-                    <small>{teacher.email}</small>
-                    <small>{teacher.phone ?? "Telefone não informado"}</small>
+                    <span className="teacher-contact-info">
+                      <span className="teacher-contact-line">
+                        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
+                          <rect x="3" y="5" width="18" height="14" rx="2" />
+                          <path d="m4 7 8 6 8-6" />
+                        </svg>
+                        <small>{teacher.email}</small>
+                      </span>
+                      <span className="teacher-contact-line">
+                        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
+                          <path d="M7 3h3l2 5-2 2a15 15 0 0 0 4 4l2-2 5 2v3c0 1.1-.9 2-2 2A16 16 0 0 1 5 5c0-1.1.9-2 2-2Z" />
+                        </svg>
+                        <small>{teacher.phone ?? "Telefone não informado"}</small>
+                      </span>
+                    </span>
+                  </span>
+                  <span className="teacher-card-details">
                     <span className="teacher-class-tags">
                       {teacher.classes.map((schoolClass) => (
                         <span key={schoolClass.id}>
@@ -609,13 +573,13 @@ export function TeacherManagement({
                         return subject ? <span key={id}>{subject.name}</span> : null;
                       })}
                     </span>
-                  </span>
-                  <span className={`teacher-status ${teacher.status}`}>
-                    {teacher.status === "active"
-                      ? "ATIVO"
-                      : teacher.status === "inactive"
-                        ? "INATIVO"
-                        : "CONVITE PENDENTE"}
+                    <span className={`teacher-status ${teacher.status}`}>
+                      {teacher.status === "active"
+                        ? "ATIVO"
+                        : teacher.status === "inactive"
+                          ? "INATIVO"
+                          : "CONVITE PENDENTE"}
+                    </span>
                   </span>
                 </button>
                 {teacher.status === "pending" && (
@@ -631,90 +595,18 @@ export function TeacherManagement({
                     Ativar e definir senha
                   </button>
                 )}
-                {teacher.status !== "pending" && (
-                  <button
-                    className="teacher-subjects-button"
-                    onClick={() => {
-                      setError("");
-                      setEditingSubjectIds(teacher.subjectIds);
-                      setSubjectTeacher(teacher);
-                    }}
-                    type="button"
-                  >
-                    Matérias ({teacher.subjectIds.length})
-                  </button>
-                )}
               </li>
             ))}
           </ul>
         )}
       </section>
-      {subjectTeacher && (
-        <div
-          className="profile-backdrop"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget && !savingSubjects) {
-              setSubjectTeacher(null);
-            }
-          }}
-        >
-          <section
-            aria-labelledby="teacher-subjects-title"
-            aria-modal="true"
-            className="entry-form-dialog"
-            role="dialog"
-            tabIndex={-1}
-          >
-            <div className="class-panel-heading">
-              <div className="setup-icon" aria-hidden="true">▤</div>
-              <div>
-                <p className="card-kicker">VÍNCULO DE MATÉRIAS</p>
-                <h2 id="teacher-subjects-title">Matérias de {subjectTeacher.displayName}</h2>
-                <p>As matérias definem em quais aulas o professor poderá ser selecionado.</p>
-              </div>
-            </div>
-            <form className="teacher-form" onSubmit={saveTeacherSubjects}>
-              <fieldset className="class-picker">
-                <legend>Matérias que leciona</legend>
-                <div className="class-picker-options">
-                  {subjects.map((subject) => (
-                    <label className="class-option" key={subject.id}>
-                      <input
-                        checked={editingSubjectIds.includes(subject.id)}
-                        onChange={() =>
-                          toggleSubject(subject.id, editingSubjectIds, setEditingSubjectIds)
-                        }
-                        type="checkbox"
-                      />
-                      <span>{subject.name}</span>
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
-              {error && <p className="form-message form-error" role="alert">{error}</p>}
-              <div className="dialog-form-actions teacher-submit">
-                <button
-                  className="class-cancel-edit"
-                  disabled={savingSubjects}
-                  onClick={() => setSubjectTeacher(null)}
-                  type="button"
-                >
-                  Cancelar
-                </button>
-                <button className="class-submit" disabled={savingSubjects} type="submit">
-                  {savingSubjects ? "Salvando..." : "Salvar matérias"}
-                </button>
-              </div>
-            </form>
-          </section>
-        </div>
-      )}
       {profileTeacher && (
         <PersonProfile
           canEditPhoto={profileTeacher.status === "active"}
           canEditProfile
           classes={classes}
           kind="teachers"
+          subjects={subjects}
           teacherSubjects={profileTeacher.subjectIds
             .map((subjectId) => subjects.find((subject) => subject.id === subjectId)?.name)
             .filter((name): name is string => name !== undefined)}
@@ -722,6 +614,17 @@ export function TeacherManagement({
             const displayName = updated.displayName;
             const email = updated.email;
             const updatedClasses = updated.classes;
+            const updatedSubjectIds = updated.subjectIds;
+            if (updatedSubjectIds) {
+              setTeachers((current) => current.map((teacher) =>
+                teacher.id === updated.id
+                  ? { ...teacher, subjectIds: updatedSubjectIds }
+                  : teacher,
+              ));
+              setProfileTeacher((current) => current
+                ? { ...current, subjectIds: updatedSubjectIds }
+                : current);
+            }
             if (updated.isActive !== undefined) {
               setTeachers((current) => current.map((teacher) =>
                 teacher.id === updated.id
@@ -744,6 +647,7 @@ export function TeacherManagement({
                       phone: updated.phone ?? teacher.phone,
                       homeAddress: updated.homeAddress ?? teacher.homeAddress,
                       classes: updatedClasses,
+                      subjectIds: updatedSubjectIds ?? teacher.subjectIds,
                     }
                   : teacher,
               ).sort((a, b) => a.displayName.localeCompare(b.displayName)));

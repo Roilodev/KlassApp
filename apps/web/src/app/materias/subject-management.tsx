@@ -170,14 +170,15 @@ export function SubjectManagement({
               <li className="subject-list-item" key={subject.id}>
                 <div className="subject-list-copy">
                   <strong>{subject.name}</strong>
-                  <span>
-                    {subject.scheduleCount} horário(s) · {subject.assessmentCount} avaliação(ões)
-                  </span>
+                  <div className="subject-card-stats">
+                    <span><strong>{subject.scheduleCount}</strong> horários</span>
+                    <span><strong>{subject.assessmentCount}</strong> avaliações</span>
+                  </div>
                 </div>
                 {!readOnly && (
                   <div className="subject-list-actions">
                     <button
-                      className="subject-action"
+                      className="subject-action dialog-edit-button"
                       onClick={() => editSubject(subject)}
                       type="button"
                     >

@@ -20,6 +20,7 @@ interface Responsible {
 interface Student {
   id: string;
   fullName: string;
+  createdAt: string;
   homeAddress: string;
   hasPhoto: boolean;
   isActive: boolean;

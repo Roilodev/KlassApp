@@ -444,7 +444,7 @@ export function EventManagement({ initialEvents, classes, schoolName }: EventMan
                     {submittingStatus === "published" ? "Publicando..." : "Publicar evento"}
                   </button>
                   <button
-                    className="class-cancel-edit event-save-draft"
+                    className="class-submit event-save-draft"
                     disabled={submitting}
                     name="status"
                     type="submit"
@@ -553,7 +553,7 @@ export function EventManagement({ initialEvents, classes, schoolName }: EventMan
                 {schoolEvent.status === "draft" ? (
                   <>
                     <button
-                      className="event-edit-button"
+                      className="event-edit-button dialog-edit-button"
                       disabled={Boolean(publishingId) || Boolean(cancellingId)}
                       onClick={() => editEvent(schoolEvent)}
                       type="button"
@@ -572,7 +572,7 @@ export function EventManagement({ initialEvents, classes, schoolName }: EventMan
                 ) : schoolEvent.status === "published" ? (
                   <>
                     <button
-                      className="event-edit-button"
+                      className="event-edit-button dialog-edit-button"
                       disabled={Boolean(cancellingId) || Boolean(publishingId)}
                       onClick={() => editEvent(schoolEvent)}
                       type="button"

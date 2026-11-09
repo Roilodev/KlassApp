@@ -114,6 +114,120 @@ describe('BehaviorService', () => {
     expect(transaction).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    ['invalid id', 'invalid', validInput],
+    ['unknown category', recordId, { ...validInput, category: 'diagnosis' }],
+    ['blank description', recordId, { ...validInput, description: ' ' }],
+    ['invalid date', recordId, { ...validInput, occurredOn: '2026-02-31' }],
+  ])('rejects behavior updates with %s before touching the database', async (_case, id, input) => {
+    const { service, query, transaction } = makeService(async () => ({ rows: [], rowCount: 0 }));
+    await expect(
+      service.update('school-id', 'user-id', 'admin', id, input),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(query).not.toHaveBeenCalled();
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('updates and audits a behavior observation within the teacher assigned class', async () => {
+    const queryHandler = vi.fn(async (sql: string) => {
+      if (sql.includes('UPDATE behavior_records')) {
+        expect(sql).toContain('teacher_class_assignments');
+        return { rows: [{ student_id: studentId }], rowCount: 1 };
+      }
+      if (sql.includes("'behavior.record_updated'")) {
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('FROM behavior_records')) {
+        return {
+          rows: [{
+            id: recordId,
+            enrollment_id: enrollmentId,
+            student_id: studentId,
+            student_name: 'Estudante de teste',
+            class_id: 'b0b80123-e89b-42d3-a456-426614174000',
+            class_label: '4º ano · Turma A',
+            category: 'positive',
+            description: 'Ajudou um colega durante a atividade.',
+            occurred_on: '2026-11-07',
+            recorded_by: 'Professor de teste',
+            created_at: new Date('2026-11-06T15:00:00.000Z'),
+          }],
+          rowCount: 1,
+        };
+      }
+      return { rows: [], rowCount: 1 };
+    });
+    const { service, query, transaction } = makeService(queryHandler);
+
+    await expect(
+      service.update('school-id', 'teacher-id', 'teacher', recordId, {
+        category: 'positive',
+        description: ' Ajudou um colega durante a atividade. ',
+        occurredOn: '2026-11-07',
+      }),
+    ).resolves.toMatchObject({
+      id: recordId,
+      category: 'positive',
+      description: 'Ajudou um colega durante a atividade.',
+      occurredOn: '2026-11-07',
+    });
+    expect(transaction).toHaveBeenCalledOnce();
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('teacher_class_assignments'),
+      expect.arrayContaining(['teacher']),
+    );
+    const auditCall = query.mock.calls.find(([sql]) => sql.includes("'behavior.record_updated'"));
+    expect(auditCall?.[1]?.[3]).not.toContain('Ajudou um colega');
+  });
+
+  it('does not update a behavior observation outside the teacher assigned classes', async () => {
+    const { service, transaction } = makeService(async () => ({ rows: [], rowCount: 0 }));
+    await expect(
+      service.update('school-id', 'teacher-id', 'teacher', recordId, {
+        category: 'positive',
+        description: 'Observação atualizada.',
+        occurredOn: '2026-11-07',
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(transaction).toHaveBeenCalledOnce();
+  });
+
+  it('deletes and audits a behavior observation within the teacher assigned class', async () => {
+    const queryHandler = vi.fn(async (sql: string) => {
+      if (sql.includes('DELETE FROM behavior_records')) {
+        expect(sql).toContain('teacher_class_assignments');
+        return {
+          rows: [{
+            student_id: studentId,
+            category: 'participation',
+            occurred_on: '2026-11-06',
+          }],
+          rowCount: 1,
+        };
+      }
+      return { rows: [], rowCount: 1 };
+    });
+    const { service, query, transaction } = makeService(queryHandler);
+
+    await expect(
+      service.remove('school-id', 'teacher-id', 'teacher', recordId),
+    ).resolves.toBeUndefined();
+    expect(transaction).toHaveBeenCalledOnce();
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('teacher_class_assignments'),
+      ['school-id', recordId, 'teacher', 'teacher-id'],
+    );
+    expect(query.mock.calls.some(([sql]) => sql.includes("'behavior.record_deleted'"))).toBe(true);
+  });
+
+  it('does not delete a behavior observation outside the teacher assigned classes', async () => {
+    const { service, transaction } = makeService(async () => ({ rows: [], rowCount: 0 }));
+    await expect(
+      service.remove('school-id', 'teacher-id', 'teacher', recordId),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(transaction).toHaveBeenCalledOnce();
+  });
+
   it('lists only records from classes assigned to the teacher', async () => {
     const { service, query } = makeService(async () => ({
       rows: [{

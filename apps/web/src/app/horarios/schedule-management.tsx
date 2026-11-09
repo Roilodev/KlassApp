@@ -328,14 +328,6 @@ export function ScheduleManagement({
                   Cancelar
                 </button>
               )}
-              <button
-                className="class-cancel-edit"
-                disabled={submitting}
-                onClick={() => setIsFormOpen(false)}
-                type="button"
-              >
-                Fechar
-              </button>
             </div>
             </form>
           )}
@@ -405,7 +397,7 @@ export function ScheduleManagement({
                         <span className="schedule-actions">
                           <button
                             aria-label={`Editar ${schedule.subject} de ${schedule.classLabel}`}
-                            className="schedule-edit"
+                            className="schedule-edit dialog-edit-button"
                             disabled={Boolean(deletingId) || submitting}
                             onClick={() => editSchedule(schedule)}
                             type="button"

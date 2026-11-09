@@ -23,6 +23,7 @@ export interface CreateStudentInput {
 export interface StudentRecord {
   id: string;
   fullName: string;
+  createdAt: string;
   homeAddress: string;
   hasPhoto: boolean;
   isActive: boolean;
@@ -48,6 +49,7 @@ export class StudentsService {
     const result = await this.database.query<{
       id: string;
       full_name: string;
+      created_at: Date;
       home_address: string | null;
       academic_year: number | null;
       grade: string | null;
@@ -60,6 +62,7 @@ export class StudentsService {
     }>(
       `SELECT students.id,
               students.full_name,
+              students.created_at,
               students.home_address,
               students.is_active,
               students.leave_date::text AS leave_date,
@@ -115,6 +118,7 @@ export class StudentsService {
     return result.rows.map((row) => ({
       id: row.id,
       fullName: row.full_name,
+      createdAt: row.created_at.toISOString(),
       homeAddress: row.home_address ?? '',
       hasPhoto: row.has_photo,
       isActive: row.is_active,
@@ -227,8 +231,8 @@ export class StudentsService {
         throw new BadRequestException('O ano letivo não corresponde à turma selecionada.');
       }
 
-      const studentResult = await client.query<{ id: string }>(
-        'INSERT INTO students (school_id, full_name, home_address, created_by) VALUES ($1, $2, $3, $4) RETURNING id',
+      const studentResult = await client.query<{ id: string; created_at: Date }>(
+        'INSERT INTO students (school_id, full_name, home_address, created_by) VALUES ($1, $2, $3, $4) RETURNING id, created_at',
         [schoolId, fullName, homeAddress || null, actorId],
       );
       const studentId = studentResult.rows[0].id;
@@ -291,6 +295,7 @@ export class StudentsService {
       return {
         id: studentId,
         fullName,
+        createdAt: studentResult.rows[0].created_at.toISOString(),
         homeAddress,
         hasPhoto: false,
         isActive: true,

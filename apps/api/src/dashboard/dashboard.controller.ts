@@ -18,4 +18,10 @@ export class DashboardController {
       request.user.role,
     );
   }
+
+  @Get('observations')
+  @SchoolRoles('admin')
+  observations(@Req() request: AuthenticatedRequest) {
+    return this.dashboard.getObservations(request.user.schoolId);
+  }
 }

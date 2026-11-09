@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PersonPhoto } from "./person-photo";
+import type { SchoolSubject } from "./horarios/schedule-management";
 import type { SchoolClass } from "./turmas/class-form";
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
@@ -89,6 +90,7 @@ interface TeacherProfileData {
     leaveReason: string | null;
   };
   classes: Array<{ id: string; year: number; grade: string; name: string }>;
+  subjectIds: string[];
   assessments: Array<{
     id: string;
     title: string;
@@ -120,6 +122,7 @@ interface PersonProfileProps {
   canEditPhoto: boolean;
   canEditProfile: boolean;
   classes?: SchoolClass[];
+  subjects?: SchoolSubject[];
   teacherSubjects?: string[];
   onProfileUpdated?: (updated: {
     id: string;
@@ -133,6 +136,7 @@ interface PersonProfileProps {
     leaveReason?: string | null;
     responsibles?: StudentProfileData["responsibles"];
     classes?: SchoolClass[];
+    subjectIds?: string[];
   }) => void;
   onClose: () => void;
 }
@@ -171,6 +175,7 @@ export function PersonProfile({
   canEditPhoto,
   canEditProfile,
   classes = [],
+  subjects = [],
   teacherSubjects = [],
   onProfileUpdated,
   onClose,
@@ -197,12 +202,8 @@ export function PersonProfile({
   const [teacherPhone, setTeacherPhone] = useState("");
   const [teacherHomeAddress, setTeacherHomeAddress] = useState("");
   const [teacherClassIds, setTeacherClassIds] = useState<string[]>([]);
+  const [teacherSubjectIds, setTeacherSubjectIds] = useState<string[]>([]);
   const newResponsibleNameRef = useRef<HTMLInputElement>(null);
-  const [photoActionsTarget, setPhotoActionsTarget] = useState<HTMLDivElement | null>(null);
-  const setPhotoActionsContainer = useCallback((element: HTMLDivElement | null) => {
-    setPhotoActionsTarget(element);
-  }, []);
-
   useEffect(() => {
     const controller = new AbortController();
     async function loadProfile() {
@@ -253,6 +254,7 @@ export function PersonProfile({
       setTeacherPhone(teacherProfile.teacher.phone ?? "");
       setTeacherHomeAddress(teacherProfile.teacher.homeAddress ?? "");
       setTeacherClassIds(teacherProfile.classes.map((schoolClass) => schoolClass.id));
+      setTeacherSubjectIds(teacherProfile.subjectIds);
     }
     setSaveError("");
     setSaveSuccess("");
@@ -309,6 +311,7 @@ export function PersonProfile({
               phone: teacherPhone,
               homeAddress: teacherHomeAddress,
               classIds: teacherClassIds,
+              subjectIds: teacherSubjectIds,
             }),
       });
       if (!response.ok) {
@@ -344,6 +347,7 @@ export function PersonProfile({
         homeAddress?: string;
         responsibles?: StudentProfileData["responsibles"];
         classes?: SchoolClass[];
+        subjectIds?: string[];
       };
       if (isStudent && !updated.responsibles) {
         const message = "A API não retornou os responsáveis salvos. Atualize o perfil antes de continuar.";
@@ -378,6 +382,7 @@ export function PersonProfile({
               homeAddress: updated.homeAddress ?? current.teacher.homeAddress,
             },
             classes: updated.classes,
+            subjectIds: updated.subjectIds ?? current.subjectIds,
           };
         }
         return current;
@@ -488,11 +493,18 @@ export function PersonProfile({
   return (
     <>
     <div className="profile-backdrop" onMouseDown={(event) => {
-      if (event.target === event.currentTarget && !saving) onClose();
+      if (event.target === event.currentTarget && !saving) {
+        if (isEditing) setIsEditing(false);
+        else onClose();
+      }
     }}>
       <section
-        aria-labelledby={(studentProfile || teacherProfile) && !isEditing ? "person-ficha-title" : "person-profile-title"}
-        aria-modal="true"
+        aria-labelledby={teacherProfile
+          ? "person-ficha-title"
+          : isEditing
+          ? "profile-edit-title"
+          : (studentProfile || teacherProfile) ? "person-ficha-title" : "person-profile-title"}
+        aria-modal={!(isEditing && teacherProfile)}
         className="person-profile-dialog"
         onKeyDown={(event) => {
           if (event.key === "Escape" && !saving) {
@@ -517,8 +529,7 @@ export function PersonProfile({
               <div className="student-ficha-identity">
                 <div className="student-ficha-photo">
                   <PersonPhoto
-                    actionsTarget={photoActionsTarget}
-                    editable={canEditPhoto}
+                    editable={false}
                     kind="students"
                     personId={personId}
                     personName={studentProfile.student.fullName}
@@ -608,7 +619,7 @@ export function PersonProfile({
             </footer>
           </section>
         )}
-        {teacherProfile && !isEditing && (
+        {teacherProfile && (
           <section className="student-ficha-sheet teacher-ficha-sheet" aria-labelledby="person-ficha-title">
             <header className="student-ficha-header">
               <span className="student-ficha-mark" aria-hidden="true">✦</span>
@@ -622,8 +633,7 @@ export function PersonProfile({
               <div className="student-ficha-identity">
                 <div className="student-ficha-photo">
                   <PersonPhoto
-                    actionsTarget={photoActionsTarget}
-                    editable={canEditPhoto}
+                    editable={false}
                     kind="teachers"
                     personId={personId}
                     personName={teacherProfile.teacher.displayName}
@@ -742,10 +752,10 @@ export function PersonProfile({
             </footer>
           </section>
         )}
-        {(!(studentProfile || teacherProfile) || isEditing) && (
+        {!profile && !isEditing && (
           <div className="person-profile-heading">
             <PersonPhoto
-              editable={canEditPhoto}
+              editable={false}
               kind={kind}
               personId={personId}
               personName={profileName}
@@ -756,7 +766,7 @@ export function PersonProfile({
                 {canEditProfile && !loading && !error && !isEditing && (
                   <button
                     aria-label={`Editar perfil de ${profileName}`}
-                    className="profile-edit-icon"
+                    className="profile-edit-icon dialog-edit-button"
                     onClick={beginEditing}
                     title="Editar perfil"
                     type="button"
@@ -768,40 +778,41 @@ export function PersonProfile({
                 )}
               </div>
               <h2 id="person-profile-title">{profileName}</h2>
-              {studentProfile && (
-                <div className="profile-header-responsibles" aria-label="Responsáveis">
-                  <p className="profile-header-label">RESPONSÁVEIS</p>
-                  {studentProfile.responsiblesRestricted ? (
-                    <p className="profile-header-note">Os contatos dos responsáveis são restritos à administração.</p>
-                  ) : studentProfile.responsibles.length === 0 ? (
-                    <p className="profile-header-note">Nenhum responsável cadastrado.</p>
-                  ) : (
-                    <ul>
-                      {studentProfile.responsibles.map((responsible) => (
-                        <li key={responsible.id}>
-                          <strong>{responsible.fullName}</strong>
-                          <span>{responsible.relationship} · {responsible.phone}</span>
-                          <small>
-                            {responsible.notificationAuthorized
-                              ? "Autorizado para notificações"
-                              : "Sem autorização de notificações"}
-                          </small>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
-              {teacherProfile && <p>{teacherProfile.teacher.email}</p>}
-              {teacherProfile && <p>{teacherProfile.teacher.phone ?? "Telefone não informado"}</p>}
-              {teacherProfile && (
-                <p className={teacherProfile.teacher.isActive ? "profile-active-status" : "profile-inactive-status"}>
-                  {teacherProfile.teacher.isActive ? "Perfil ativo" : "Perfil inativo"}
-                </p>
-              )}
             </div>
           </div>
         )}
+        {isEditing && (
+          <div
+            className={teacherProfile ? "profile-edit-window-backdrop" : undefined}
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget && !saving) setIsEditing(false);
+            }}
+          >
+          <section
+            aria-labelledby="profile-edit-title"
+            aria-modal="true"
+            className={teacherProfile
+              ? "person-profile-dialog profile-edit-dialog"
+              : undefined}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && !saving) setIsEditing(false);
+            }}
+            role="dialog"
+            tabIndex={-1}
+          >
+          <header className="profile-edit-window-heading">
+            <PersonPhoto
+              editable={canEditPhoto}
+              kind={kind}
+              personId={personId}
+              personName={profileName}
+            />
+            <div>
+              <p className="card-kicker">{isStudent ? "PERFIL DO ALUNO" : "PERFIL DO PROFESSOR"}</p>
+              <h2 id="profile-edit-title">Editar dados</h2>
+              <p>{profileName}</p>
+            </div>
+          </header>
 
         {leaveActionError && !leaveFormOpen && (
           <p className="form-message form-error" role="alert">{leaveActionError}</p>
@@ -866,7 +877,7 @@ export function PersonProfile({
                             <span>{responsible.relationship} · {responsible.phone}</span>
                           </div>
                           <button
-                            className="profile-responsible-edit"
+                            className="profile-responsible-edit dialog-edit-button"
                             onClick={() => setCollapsedResponsibleIds((current) =>
                               current.filter((id) => id !== responsible.id),
                             )}
@@ -980,80 +991,175 @@ export function PersonProfile({
               </>
             ) : (
               <>
-                <label>
-                  Nome completo
-                  <input
-                    autoComplete="name"
-                    maxLength={160}
-                    onChange={(event) => setTeacherName(event.target.value)}
-                    required
-                    value={teacherName}
-                  />
-                </label>
-                <label>
-                  Email de acesso da conta
-                  <input
-                    autoComplete="email"
-                    maxLength={254}
-                    onChange={(event) => setTeacherEmail(event.target.value)}
-                    required
-                    type="email"
-                    value={teacherEmail}
-                  />
-                </label>
-                <label>
-                  Telefone para contato da escola
-                  <input
-                    autoComplete="tel"
-                    inputMode="tel"
-                    maxLength={20}
-                    onChange={(event) => setTeacherPhone(event.target.value)}
-                    placeholder="(11) 99999-9999"
-                    required
-                    type="tel"
-                    value={teacherPhone}
-                  />
-                </label>
-                <label>
-                  Endereço residencial
-                  <input
-                    autoComplete="street-address"
-                    maxLength={300}
-                    onChange={(event) => setTeacherHomeAddress(event.target.value)}
-                    placeholder="Rua, número, bairro, cidade"
-                    value={teacherHomeAddress}
-                  />
-                </label>
-                <p className="profile-edit-note">
-                  Nome e email pertencem à conta global do professor e podem refletir-se em outras escolas. O telefone fica associado somente a esta escola para possíveis notificações futuras.
-                </p>
-                <fieldset className="profile-teacher-classes">
+                <fieldset className="profile-teacher-identity">
+                  <legend>Dados do professor</legend>
+                  <label>
+                    Nome completo
+                    <input
+                      autoComplete="name"
+                      maxLength={160}
+                      onChange={(event) => setTeacherName(event.target.value)}
+                      required
+                      value={teacherName}
+                    />
+                  </label>
+                  <label>
+                    Email de acesso da conta
+                    <input
+                      autoComplete="email"
+                      maxLength={254}
+                      onChange={(event) => setTeacherEmail(event.target.value)}
+                      required
+                      type="email"
+                      value={teacherEmail}
+                    />
+                  </label>
+                  <label>
+                    Telefone para contato da escola
+                    <input
+                      autoComplete="tel"
+                      inputMode="tel"
+                      maxLength={20}
+                      onChange={(event) => setTeacherPhone(event.target.value)}
+                      placeholder="(11) 99999-9999"
+                      required
+                      type="tel"
+                      value={teacherPhone}
+                    />
+                  </label>
+                  <label>
+                    Endereço residencial
+                    <input
+                      autoComplete="street-address"
+                      maxLength={300}
+                      onChange={(event) => setTeacherHomeAddress(event.target.value)}
+                      placeholder="Rua, número, bairro, cidade"
+                      value={teacherHomeAddress}
+                    />
+                  </label>
+                  <p className="profile-edit-note">
+                    Nome e email pertencem à conta global do professor e podem refletir-se em outras escolas. O telefone fica associado somente a esta escola para possíveis notificações futuras.
+                  </p>
+                </fieldset>
+                <fieldset className="profile-teacher-classes profile-teacher-classes-classes">
                   <legend>Turmas atribuídas</legend>
                   {classes.length === 0 ? (
                     <p>Não há turmas cadastradas nesta escola.</p>
-                  ) : classes.map((schoolClass) => (
-                    <label className="class-option" key={schoolClass.id}>
-                      <input
-                        checked={teacherClassIds.includes(schoolClass.id)}
-                        onChange={() => setTeacherClassIds((current) =>
-                          current.includes(schoolClass.id)
-                            ? current.filter((id) => id !== schoolClass.id)
-                            : [...current, schoolClass.id],
-                        )}
-                        type="checkbox"
-                      />
-                      <span>
-                        {schoolClass.grade} · Turma {schoolClass.name} ({schoolClass.year})
-                      </span>
-                    </label>
-                  ))}
+                  ) : (
+                    <>
+                      <label className="profile-teacher-selector">
+                        Adicionar turma
+                        <select
+                          onChange={(event) => {
+                            const classId = event.target.value;
+                            if (classId) {
+                              setTeacherClassIds((current) => [...current, classId]);
+                            }
+                          }}
+                          value=""
+                        >
+                          <option disabled value="">Selecionar turma...</option>
+                          {classes
+                            .filter((schoolClass) => !teacherClassIds.includes(schoolClass.id))
+                            .map((schoolClass) => (
+                              <option key={schoolClass.id} value={schoolClass.id}>
+                                {schoolClass.grade} · Turma {schoolClass.name} ({schoolClass.year})
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                      {teacherClassIds.length === 0 ? (
+                        <p>Nenhuma turma atribuída.</p>
+                      ) : (
+                        <ul className="profile-teacher-assigned-list">
+                          {teacherClassIds.map((classId) => {
+                            const schoolClass = classes.find((item) => item.id === classId);
+                            if (!schoolClass) return null;
+                            return (
+                              <li key={classId}>
+                                <span>
+                                  {schoolClass.grade} · Turma {schoolClass.name} ({schoolClass.year})
+                                </span>
+                                <button
+                                  aria-label={`Remover turma ${schoolClass.name}`}
+                                  className="profile-teacher-assigned-remove"
+                                  onClick={() => setTeacherClassIds((current) =>
+                                    current.filter((id) => id !== classId),
+                                  )}
+                                  type="button"
+                                >
+                                  Remover
+                                </button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </>
+                  )}
                   <p className="profile-edit-note">
                     Para retirar uma turma que ainda tenha horários vinculados ao professor, atualize esses horários primeiro.
                   </p>
                 </fieldset>
+                <fieldset className="profile-teacher-classes profile-teacher-classes-subjects">
+                  <legend>Matérias que leciona</legend>
+                  {subjects.length === 0 ? (
+                    <p>Não há matérias cadastradas nesta escola.</p>
+                  ) : (
+                    <>
+                      <label className="profile-teacher-selector">
+                        Adicionar matéria
+                        <select
+                          onChange={(event) => {
+                            const subjectId = event.target.value;
+                            if (subjectId) {
+                              setTeacherSubjectIds((current) => [...current, subjectId]);
+                            }
+                          }}
+                          value=""
+                        >
+                          <option disabled value="">Selecionar matéria...</option>
+                          {subjects
+                            .filter((subject) => !teacherSubjectIds.includes(subject.id))
+                            .map((subject) => (
+                              <option key={subject.id} value={subject.id}>{subject.name}</option>
+                            ))}
+                        </select>
+                      </label>
+                      {teacherSubjectIds.length === 0 ? (
+                        <p>Nenhuma matéria atribuída.</p>
+                      ) : (
+                        <ul className="profile-teacher-assigned-list">
+                          {teacherSubjectIds.map((subjectId) => {
+                            const subject = subjects.find((item) => item.id === subjectId);
+                            if (!subject) return null;
+                            return (
+                              <li key={subjectId}>
+                                <span>{subject.name}</span>
+                                <button
+                                  aria-label={`Remover matéria ${subject.name}`}
+                                  className="profile-teacher-assigned-remove"
+                                  onClick={() => setTeacherSubjectIds((current) =>
+                                    current.filter((id) => id !== subjectId),
+                                  )}
+                                  type="button"
+                                >
+                                  Remover
+                                </button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </>
+                  )}
+                </fieldset>
               </>
             )}
             <div className="profile-edit-actions">
+              <button className="class-submit" disabled={saving} type="submit">
+                {saving ? "Salvando..." : "Salvar alterações"}
+              </button>
               <button
                 className="profile-cancel-button"
                 disabled={saving}
@@ -1062,24 +1168,21 @@ export function PersonProfile({
               >
                 Cancelar
               </button>
-              <button className="class-submit" disabled={saving} type="submit">
-                {saving ? "Salvando..." : "Salvar alterações"}
-              </button>
-              <button className="profile-cancel-button" disabled={saving} onClick={onClose} type="button">
-                Fechar
-              </button>
             </div>
           </form>
         ) : null}
+          </section>
+          </div>
+        )}
         {!isEditing && (
           <div className="profile-dialog-actions">
             {(studentProfile || teacherProfile) && !loading && !error && (
               <>
-                <button className="profile-cancel-button" onClick={() => window.print()} type="button">
+                <button className="profile-cancel-button dialog-print-button" onClick={() => window.print()} type="button">
                   Imprimir ficha
                 </button>
                 {canEditProfile && (
-                  <button className="profile-cancel-button" onClick={beginEditing} type="button">
+                  <button className="profile-cancel-button dialog-edit-button" onClick={beginEditing} type="button">
                     Editar dados
                   </button>
                 )}
@@ -1101,9 +1204,6 @@ export function PersonProfile({
                   >
                     {saving ? "Salvando..." : personIsActive ? "Dar de baixa" : "Reativar"}
                   </button>
-                )}
-                {canEditPhoto && (
-                  <div className="profile-photo-action-target" ref={setPhotoActionsContainer} />
                 )}
               </>
             )}
@@ -1168,6 +1268,9 @@ export function PersonProfile({
             </label>
             {leaveActionError && <p className="form-message form-error" role="alert">{leaveActionError}</p>}
             <div className="profile-edit-actions">
+              <button className="class-submit" disabled={saving} type="submit">
+                {saving ? "Salvando..." : "Confirmar baixa"}
+              </button>
               <button
                 className="profile-cancel-button"
                 disabled={saving}
@@ -1178,9 +1281,6 @@ export function PersonProfile({
                 type="button"
               >
                 Cancelar
-              </button>
-              <button className="class-submit" disabled={saving} type="submit">
-                {saving ? "Salvando..." : "Confirmar baixa"}
               </button>
             </div>
           </form>

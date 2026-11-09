@@ -106,7 +106,7 @@ export function RecessSettings({ initialRecess }: RecessSettingsProps) {
         </div>
         <p className="school-recess-note">Este intervalo será mostrado de segunda a sexta-feira.</p>
         <div className="class-form-actions">
-          <button className="class-submit" disabled={submitting} type="submit">
+          <button className="class-submit recess-save-button" disabled={submitting} type="submit">
             {submitting ? "Salvando..." : "Salvar configuração"}
           </button>
         </div>

@@ -97,12 +97,9 @@ export function ClassForm({ initialClasses, initialSchedules, recess }: ClassFor
   if (recess.startsAt && recess.endsAt) {
     scheduleTimes.add(`${recess.startsAt}|${recess.endsAt}`);
   }
-  const classesByGrade = new Map<string, SchoolClass[]>();
-  for (const schoolClass of classes) {
-    const gradeClasses = classesByGrade.get(schoolClass.grade) ?? [];
-    gradeClasses.push(schoolClass);
-    classesByGrade.set(schoolClass.grade, gradeClasses);
-  }
+  const schoolGrades = [...new Set(classes.map((schoolClass) => schoolClass.grade))].sort(
+    (left, right) => left.localeCompare(right),
+  );
 
   function resetForm() {
     setEditingClassId(null);
@@ -130,6 +127,12 @@ export function ClassForm({ initialClasses, initialSchedules, recess }: ClassFor
   function closeClassDetails() {
     setSelectedClassId(null);
     setEditingClassId(null);
+  }
+
+  function returnToClassDetails() {
+    resetForm();
+    setError("");
+    setSuccess("");
   }
 
   function openCreateDialog() {
@@ -309,7 +312,7 @@ export function ClassForm({ initialClasses, initialSchedules, recess }: ClassFor
             </section>
             <div className="class-details-actions">
               <button
-                className="class-cancel-edit"
+                className="class-cancel-edit dialog-print-button"
                 onClick={() => window.print()}
                 type="button"
               >
@@ -326,7 +329,7 @@ export function ClassForm({ initialClasses, initialSchedules, recess }: ClassFor
                 Horário
               </button>
               <button
-                className="class-submit"
+                className="class-submit dialog-edit-button"
                 onClick={() => editClass(selectedClass)}
                 type="button"
               >
@@ -445,18 +448,18 @@ export function ClassForm({ initialClasses, initialSchedules, recess }: ClassFor
               )}
             </section>
             <div className="weekly-schedule-actions">
-              <button className="class-cancel-edit" onClick={printWeeklySchedule} type="button">
+              <button className="schedule-print-button" onClick={printWeeklySchedule} type="button">
                 Imprimir horário
               </button>
               <button
-                className="class-submit"
+                className="class-cancel-edit"
                 onClick={() => {
                   setScheduleClassId(null);
                   setSelectedClassId(scheduleClass.id);
                 }}
                 type="button"
               >
-                Voltar para turma
+                Fechar
               </button>
             </div>
           </div>
@@ -469,7 +472,7 @@ export function ClassForm({ initialClasses, initialSchedules, recess }: ClassFor
           eyebrow="ORGANIZAÇÃO ESCOLAR"
           icon="✎"
           isBusy={submitting}
-          onClose={closeClassDetails}
+          onClose={returnToClassDetails}
           title="Editar turma"
           titleId="edit-class-title"
         >
@@ -512,18 +515,10 @@ export function ClassForm({ initialClasses, initialSchedules, recess }: ClassFor
               <button
                 className="class-cancel-edit"
                 disabled={submitting}
-                onClick={resetForm}
+                onClick={returnToClassDetails}
                 type="button"
               >
                 Cancelar
-              </button>
-              <button
-                className="class-cancel-edit"
-                disabled={submitting}
-                onClick={closeClassDetails}
-                type="button"
-              >
-                Fechar
               </button>
             </div>
             {error && <p className="form-message form-error" role="alert">{error}</p>}
@@ -554,40 +549,53 @@ export function ClassForm({ initialClasses, initialSchedules, recess }: ClassFor
             <p>Cadastre o primeiro ano escolar e sua turma para começar.</p>
           </div>
         ) : (
-          <div className="class-grade-groups">
-            {[...classesByGrade.entries()]
-              .sort(([gradeA], [gradeB]) => gradeA.localeCompare(gradeB))
-              .map(([grade, gradeClasses]) => (
-                <section
-                  aria-labelledby={`class-grade-${grade}`}
-                  className="class-grade-group"
-                  key={grade}
-                >
-                  <h3 id={`class-grade-${grade}`}>{grade}</h3>
-                  <ul className="class-list class-card-grid">
-                    {gradeClasses.map((schoolClass) => (
-                      <li className="class-list-item" key={schoolClass.id}>
-                        <button
-                          aria-label={`Ver detalhes da turma ${schoolClass.name}, ${grade}`}
-                          className="class-card-button"
-                          onClick={() => openClassDetails(schoolClass)}
-                          type="button"
-                        >
-                          <span className="class-list-icon" aria-hidden="true">▦</span>
-                          <span className="class-list-copy">
-                            <strong>Turma {schoolClass.name}</strong>
-                            <small>Ano letivo {schoolClass.year}</small>
-                          </span>
-                          <span className="class-list-tag">
-                            {schoolClass.students?.length ?? 0} alunos
-                          </span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              ))}
-          </div>
+          <ul className="class-list class-card-grid">
+            {[...classes]
+              .sort((left, right) =>
+                right.year - left.year ||
+                left.grade.localeCompare(right.grade) ||
+                left.name.localeCompare(right.name),
+              )
+              .map((schoolClass) => {
+                const gradeColorIndex = schoolGrades.indexOf(schoolClass.grade);
+                const gradeHue = Math.round((gradeColorIndex * 360) / schoolGrades.length);
+                return (
+                  <li
+                    className="class-list-item"
+                    key={schoolClass.id}
+                    style={{
+                      backgroundColor: `hsl(${gradeHue} 64% 94%)`,
+                      borderColor: `hsl(${gradeHue} 48% 78%)`,
+                    }}
+                  >
+                    <button
+                      aria-label={`Ver detalhes da turma ${schoolClass.name}, ${schoolClass.grade}, ${schoolClass.year}`}
+                      className="class-card-button"
+                      onClick={() => openClassDetails(schoolClass)}
+                      type="button"
+                    >
+                      <span
+                        className="class-list-icon"
+                        aria-hidden="true"
+                        style={{
+                          backgroundColor: `hsl(${gradeHue} 62% 78%)`,
+                          color: `hsl(${gradeHue} 48% 30%)`,
+                        }}
+                      >
+                        ▦
+                      </span>
+                      <span className="class-list-copy">
+                        <strong>Turma {schoolClass.name}</strong>
+                        <small>{schoolClass.grade} · Ano letivo {schoolClass.year}</small>
+                      </span>
+                      <span className="class-list-tag">
+                        {schoolClass.students?.length ?? 0} alunos
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+          </ul>
         )}
       </section>
     </>

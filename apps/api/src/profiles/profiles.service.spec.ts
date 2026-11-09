@@ -300,6 +300,7 @@ describe('ProfilesService', () => {
       phone: '+5511999998888',
       homeAddress: 'Rua A, 123',
       classes: [{ id: classId, year: 2026, grade: '4º ano', name: 'A' }],
+      subjectIds: [],
     });
     expect(transaction).toHaveBeenCalledOnce();
     expect(query).toHaveBeenCalledWith(
@@ -311,6 +312,51 @@ describe('ProfilesService', () => {
       ['school-id', teacherId, '+5511999998888', 'Rua A, 123'],
     );
     expect(query.mock.calls.some(([sql]) => sql.includes('INSERT INTO audit_logs'))).toBe(true);
+  });
+
+  it('updates teacher subjects with the profile in the same transaction', async () => {
+    const teacherId = 'c0a80123-e89b-42d3-a456-426614174007';
+    const subjectId = 'c0a80123-e89b-42d3-a456-426614174008';
+    const { service, query } = makeService(async (sql) => {
+      if (sql.includes('FROM users') && sql.includes('school_memberships.role =')) {
+        return {
+          rows: [{
+            display_name: 'Professor',
+            email: 'teacher@example.test',
+            phone_e164: '+5511999998888',
+          }],
+          rowCount: 1,
+        };
+      }
+      if (sql.includes('FROM classes')) {
+        return { rows: [], rowCount: 0 };
+      }
+      if (sql.includes('FROM school_subjects')) {
+        return { rows: [{ id: subjectId }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 1 };
+    });
+
+    await expect(service.updateTeacherProfile(
+      'school-id',
+      'admin-id',
+      teacherId,
+      {
+        displayName: 'Professor',
+        email: 'teacher@example.test',
+        phone: '(11) 99999-8888',
+        classIds: [],
+        subjectIds: [subjectId],
+      },
+    )).resolves.toMatchObject({ subjectIds: [subjectId] });
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('DELETE FROM teacher_subject_assignments'),
+      ['school-id', teacherId],
+    );
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO teacher_subject_assignments'),
+      ['school-id', teacherId, [subjectId]],
+    );
   });
 
   it('prevents removing a teacher class while an assigned schedule still uses it', async () => {
@@ -446,7 +492,8 @@ describe('ProfilesService', () => {
       hasPhoto: true,
     });
     expect(profile.studentsCount).toBe(17);
-    expect(query).toHaveBeenCalledTimes(6);
+    expect(profile.subjectIds).toEqual([]);
+    expect(query).toHaveBeenCalledTimes(7);
     expect(query.mock.calls[0][0]).toContain('JOIN schools ON schools.id = school_memberships.school_id');
     const assessmentQuery = query.mock.calls.find(([sql]) => sql.includes('FROM assessments'));
     const studentCountQuery = query.mock.calls.find(([sql]) => sql.includes('FROM student_enrollments'));

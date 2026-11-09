@@ -367,7 +367,7 @@ export function AssessmentManagement({
                     Lançar resultados
                   </button>
                   <button
-                    className="assessment-edit-button"
+                    className="assessment-edit-button dialog-edit-button"
                     onClick={() => editAssessment(assessment)}
                     type="button"
                   >

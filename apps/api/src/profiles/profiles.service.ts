@@ -10,6 +10,7 @@ import { DatabaseService } from '../database/database.service.js';
 
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 type PhotoMimeType = (typeof PHOTO_TYPES)[number];
 type PhotoOwner = 'student' | 'teacher';
 
@@ -62,6 +63,7 @@ export interface UpdateTeacherProfileInput {
   phone: string;
   homeAddress?: string;
   classIds: string[];
+  subjectIds?: string[];
 }
 
 interface PhotoRecord {
@@ -361,7 +363,7 @@ export class ProfilesService {
     if (!teacher.rows[0]) {
       throw new NotFoundException('Professor não encontrado nesta escola.');
     }
-    const [classes, schedules, assessments, studentsCount, events] = await Promise.all([
+    const [classes, subjectAssignments, schedules, assessments, studentsCount, events] = await Promise.all([
       this.database.query(
         `SELECT classes.id, academic_years.year, grades.name AS grade, classes.name
          FROM teacher_class_assignments
@@ -376,6 +378,12 @@ export class ProfilesService {
          WHERE teacher_class_assignments.school_id = $1
            AND teacher_class_assignments.user_id = $2
          ORDER BY academic_years.year DESC, grades.name, classes.name`,
+        [schoolId, teacherId],
+      ),
+      this.database.query<{ subject_id: string }>(
+        `SELECT subject_id FROM teacher_subject_assignments
+         WHERE school_id = $1 AND user_id = $2
+         ORDER BY subject_id`,
         [schoolId, teacherId],
       ),
       this.database.query(
@@ -502,6 +510,7 @@ export class ProfilesService {
     return {
       teacher: teacher.rows[0],
       classes: classes.rows,
+      subjectIds: subjectAssignments.rows.map((row) => row.subject_id),
       schedules: schedules.rows,
       assessments: assessments.rows,
       studentsCount: studentsCount.rows[0].count,
@@ -773,7 +782,8 @@ export class ProfilesService {
       typeof input.email !== 'string' ||
       typeof input.phone !== 'string' ||
       (input.homeAddress !== undefined && typeof input.homeAddress !== 'string') ||
-      !Array.isArray(input.classIds)
+      !Array.isArray(input.classIds) ||
+      (input.subjectIds !== undefined && !Array.isArray(input.subjectIds))
     ) {
       throw new BadRequestException('Informe nome, email, telefone e turmas do professor.');
     }
@@ -784,6 +794,9 @@ export class ProfilesService {
       ? input.homeAddress.trim()
       : undefined;
     const classIds = [...new Set(input.classIds)];
+    const subjectIds = input.subjectIds === undefined
+      ? undefined
+      : [...new Set(input.subjectIds)];
     if (displayName.length < 1 || displayName.length > 160) {
       throw new BadRequestException('O nome deve ter entre 1 e 160 caracteres.');
     }
@@ -798,12 +811,16 @@ export class ProfilesService {
     }
     if (
       classIds.length > 100 ||
-      classIds.some((id) =>
-        typeof id !== 'string' ||
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id),
-      )
+      classIds.some((id) => typeof id !== 'string' || !UUID_PATTERN.test(id))
     ) {
       throw new BadRequestException('Selecione turmas válidas.');
+    }
+    if (
+      subjectIds &&
+      (subjectIds.length > 100 ||
+        subjectIds.some((id) => typeof id !== 'string' || !UUID_PATTERN.test(id)))
+    ) {
+      throw new BadRequestException('Selecione matérias válidas.');
     }
 
     try {
@@ -850,6 +867,16 @@ export class ProfilesService {
         );
         if (classResult.rowCount !== classIds.length) {
           throw new BadRequestException('Uma ou mais turmas não pertencem a esta escola.');
+        }
+        if (subjectIds) {
+          const subjectResult = await client.query(
+            `SELECT id FROM school_subjects
+             WHERE school_id = $1 AND id = ANY($2::uuid[])`,
+            [schoolId, subjectIds],
+          );
+          if (subjectResult.rowCount !== subjectIds.length) {
+            throw new BadRequestException('Uma ou mais matérias não pertencem a esta escola.');
+          }
         }
         const currentClasses = await client.query<{ class_id: string }>(
           `SELECT class_id FROM teacher_class_assignments
@@ -904,6 +931,31 @@ export class ProfilesService {
             [schoolId, teacherId, classIds],
           );
         }
+        let updatedSubjectIds: string[];
+        if (subjectIds) {
+          await client.query(
+            'DELETE FROM teacher_subject_assignments WHERE school_id = $1 AND user_id = $2',
+            [schoolId, teacherId],
+          );
+          if (subjectIds.length > 0) {
+            await client.query(
+              `INSERT INTO teacher_subject_assignments (school_id, user_id, subject_id)
+               SELECT $1, $2, assigned.subject_id
+               FROM unnest($3::uuid[]) AS assigned(subject_id)
+               ON CONFLICT (school_id, user_id, subject_id) DO NOTHING`,
+              [schoolId, teacherId, subjectIds],
+            );
+          }
+          updatedSubjectIds = subjectIds;
+        } else {
+          const currentSubjects = await client.query<{ subject_id: string }>(
+            `SELECT subject_id FROM teacher_subject_assignments
+             WHERE school_id = $1 AND user_id = $2
+             ORDER BY subject_id`,
+            [schoolId, teacherId],
+          );
+          updatedSubjectIds = currentSubjects.rows.map((row) => row.subject_id);
+        }
         await client.query(
           `INSERT INTO audit_logs (school_id, actor_id, action, entity_type, entity_id, details)
            VALUES ($1, $2, 'teacher.updated', 'teacher', $3, $4::jsonb)`,
@@ -923,6 +975,13 @@ export class ProfilesService {
             }),
           ],
         );
+        if (subjectIds) {
+          await client.query(
+            `INSERT INTO audit_logs (school_id, actor_id, action, entity_type, entity_id, details)
+             VALUES ($1, $2, 'teacher.subjects_updated', 'teacher', $3, $4::jsonb)`,
+            [schoolId, actorId, teacherId, JSON.stringify({ subjectIds })],
+          );
+        }
         return {
           id: teacherId,
           displayName,
@@ -930,6 +989,7 @@ export class ProfilesService {
           phone,
           homeAddress,
           classes: classResult.rows,
+          subjectIds: updatedSubjectIds,
         };
       });
     } catch (error) {
