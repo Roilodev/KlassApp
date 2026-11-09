@@ -14,6 +14,7 @@ describe('DashboardService', () => {
         required_teachers: 2,
         configured_subject_frequencies: 7,
         schedules: 20,
+        classes_with_incomplete_schedules: 0,
         events: 3,
         assessments: 8,
         behavior_records: 6,
@@ -37,6 +38,7 @@ describe('DashboardService', () => {
       requiredTeachers: 2,
       configuredSubjectFrequencies: 7,
       schedules: 20,
+      classesWithIncompleteSchedules: 0,
       events: 3,
       assessments: 8,
       behaviorRecords: 6,
@@ -56,7 +58,12 @@ describe('DashboardService', () => {
       ['school-id', 'admin-id', 'admin'],
     );
     expect(query).toHaveBeenCalledWith(
-      expect.stringContaining('weekly_frequency * class_count.total'),
+      expect.stringContaining('school_subject_grades.weekly_frequency * class_count.total'),
+      ['school-id', 'admin-id', 'admin'],
+    );
+    expect(query.mock.calls[0]?.[0]).not.toContain('school_subjects.weekly_frequency');
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('classes_with_incomplete_schedules'),
       ['school-id', 'admin-id', 'admin'],
     );
   });
@@ -72,6 +79,7 @@ describe('DashboardService', () => {
         required_teachers: null,
         configured_subject_frequencies: null,
         schedules: 7,
+        classes_with_incomplete_schedules: null,
         events: null,
         assessments: 5,
         behavior_records: 3,
@@ -95,6 +103,7 @@ describe('DashboardService', () => {
       requiredTeachers: null,
       configuredSubjectFrequencies: null,
       schedules: 7,
+      classesWithIncompleteSchedules: null,
       events: null,
       assessments: 5,
       behaviorRecords: 3,

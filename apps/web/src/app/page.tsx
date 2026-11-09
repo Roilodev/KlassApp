@@ -39,6 +39,7 @@ interface DashboardSummary {
   requiredTeachers: number | null;
   configuredSubjectFrequencies: number | null;
   schedules: number;
+  classesWithIncompleteSchedules: number | null;
   events: number | null;
   assessments: number;
   behaviorRecords: number;
@@ -154,7 +155,11 @@ function getSetupProgress(summary: DashboardSummary): SetupProgressItem[] {
       ready: summary.subjects > 0 &&
         summary.configuredSubjectFrequencies === summary.subjects,
     },
-    { label: "Horários", icon: "◷", ready: summary.schedules > 0 },
+    {
+      label: "Horários",
+      icon: "◷",
+      ready: summary.schedules > 0 && summary.classesWithIncompleteSchedules === 0,
+    },
     { label: "Eventos", icon: "▣", ready: (summary.configuredEvents ?? 0) > 0 },
   ];
 }
@@ -275,7 +280,7 @@ async function Dashboard() {
             <ol className="setup-flow-list">
               {setupItems.map((item, index) => (
                 <li key={item.label}>
-                  <div className="setup-flow-item">
+                  <div className={`setup-flow-item ${item.ready ? "ready" : "pending"}`}>
                     <span className="setup-flow-icon" aria-hidden="true">{item.icon}</span>
                     <span className="setup-flow-copy">
                       <small>ETAPA {index + 1}</small>

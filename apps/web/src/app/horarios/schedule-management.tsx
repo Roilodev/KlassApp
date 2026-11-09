@@ -32,7 +32,7 @@ export interface ScheduleRecord {
 export interface SchoolSubject {
   id: string;
   name: string;
-  weeklyFrequency: number | null;
+  gradeFrequencies: Array<{ grade: string; weeklyFrequency: number | null }>;
   scheduleCount: number;
   assessmentCount: number;
 }
@@ -70,6 +70,11 @@ export function ScheduleManagement({
   classSessions,
 }: ScheduleManagementProps) {
   const firstClass = classes[0];
+  const firstClassSubjects = firstClass
+    ? subjects.filter((subject) =>
+      subject.gradeFrequencies.some((assignment) => assignment.grade === firstClass.grade),
+    )
+    : [];
   const firstPeriod = firstClass
     ? classSessions[firstClass.session ?? "morning"][0]
     : undefined;
@@ -78,7 +83,7 @@ export function ScheduleManagement({
   const [dayOfWeek, setDayOfWeek] = useState("1");
   const [startsAt, setStartsAt] = useState(firstPeriod?.startsAt ?? "");
   const [endsAt, setEndsAt] = useState(firstPeriod?.endsAt ?? "");
-  const [subjectId, setSubjectId] = useState(subjects[0]?.id ?? "");
+  const [subjectId, setSubjectId] = useState(firstClassSubjects[0]?.id ?? "");
   const [teacherId, setTeacherId] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -106,6 +111,11 @@ export function ScheduleManagement({
   const editingSchedule = schedules.find((schedule) => schedule.id === editingScheduleId);
   const weekdaySchedules = schedules.filter((schedule) => schedule.dayOfWeek <= weekdays.length);
   const selectedClass = classes.find((schoolClass) => schoolClass.id === classId);
+  const subjectsForClass = selectedClass
+    ? subjects.filter((subject) =>
+      subject.gradeFrequencies.some((assignment) => assignment.grade === selectedClass.grade),
+    )
+    : [];
   const sessionPeriods = selectedClass
     ? classSessions[selectedClass.session ?? "morning"]
     : [];
@@ -118,7 +128,7 @@ export function ScheduleManagement({
     setDayOfWeek("1");
     setStartsAt(firstPeriod?.startsAt ?? "");
     setEndsAt(firstPeriod?.endsAt ?? "");
-    setSubjectId(subjects[0]?.id ?? "");
+    setSubjectId(firstClassSubjects[0]?.id ?? "");
     setTeacherId("");
   }
 
@@ -259,6 +269,11 @@ export function ScheduleManagement({
                   setClassId(nextClassId);
                   setStartsAt(nextPeriod?.startsAt ?? "");
                   setEndsAt(nextPeriod?.endsAt ?? "");
+                  setSubjectId(
+                    subjects.find((subject) =>
+                      subject.gradeFrequencies.some((assignment) => assignment.grade === nextClass?.grade),
+                    )?.id ?? "",
+                  );
                   setTeacherId("");
                 }}
                 required
@@ -292,11 +307,17 @@ export function ScheduleManagement({
                 required
                 value={subjectId}
               >
-                {subjects.map((subject) => (
+                {subjectsForClass.map((subject) => (
                   <option key={subject.id} value={subject.id}>{subject.name}</option>
                 ))}
               </select>
             </label>
+            {subjectsForClass.length === 0 && (
+              <div className="subject-required-notice">
+                <p>Nenhuma matéria está associada ao ano escolar {selectedClass?.grade ?? "desta turma"}.</p>
+                <Link className="class-submit" href="/materias">Configurar matérias</Link>
+              </div>
+            )}
             <label>
               Professor
               <select
@@ -378,7 +399,7 @@ export function ScheduleManagement({
             <div className="schedule-form-actions">
               <button
                 className="class-submit schedule-submit"
-                disabled={submitting || sessionPeriods.length === 0 || teacherConflicts.length > 0}
+                disabled={submitting || sessionPeriods.length === 0 || subjectsForClass.length === 0 || teacherConflicts.length > 0}
                 type="submit"
               >
                 {submitting ? "Salvando..." : editingScheduleId ? "Salvar alterações" : "Adicionar ao horário"}

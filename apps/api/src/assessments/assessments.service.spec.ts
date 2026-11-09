@@ -18,7 +18,12 @@ const validInput = {
 function makeService(
   queryHandler: (sql: string) => Promise<{ rows: Record<string, unknown>[]; rowCount: number }>,
 ) {
-  const query = vi.fn(queryHandler);
+  const query = vi.fn(async (sql: string) => {
+    if (sql.includes('FROM classes') && sql.includes('school_subject_grades')) {
+      return { rows: [{}], rowCount: 1 };
+    }
+    return queryHandler(sql);
+  });
   const transaction = vi.fn(
     (work: (client: PoolClient) => Promise<unknown>) =>
       work({ query } as unknown as PoolClient),

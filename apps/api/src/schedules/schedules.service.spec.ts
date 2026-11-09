@@ -16,8 +16,14 @@ describe('SchedulesService', () => {
 
   function makeService(
     queryHandler: (sql: string) => Promise<{ rows: Record<string, unknown>[]; rowCount: number }>,
+    subjectAssignedToGrade = true,
   ) {
     const query = vi.fn(async (sql: string) => {
+      if (sql.includes('FROM classes') && sql.includes('school_subject_grades')) {
+        return subjectAssignedToGrade
+          ? { rows: [{}], rowCount: 1 }
+          : { rows: [], rowCount: 0 };
+      }
       const result = await queryHandler(sql);
       return sql.includes('FROM school_recesses') && result.rows[0]?.id
         ? { rows: [], rowCount: 0 }
@@ -113,6 +119,30 @@ describe('SchedulesService', () => {
     );
     expect(query).toHaveBeenCalledWith(
       expect.stringContaining("'schedule.created'"),
+      expect.anything(),
+    );
+  });
+
+  it('rejects a subject not assigned to the class grade', async () => {
+    const queryHandler = vi.fn(async (sql: string) => {
+      if (sql.includes('pg_advisory_xact_lock')) {
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('SELECT id FROM classes')) {
+        return { rows: [{ id: validInput.classId }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT id FROM school_subjects')) {
+        return { rows: [{ id: validInput.subjectId }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 1 };
+    });
+    const { service, query } = makeService(queryHandler, false);
+
+    await expect(
+      service.create('school-id', 'user-id', validInput),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(query).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO class_schedules'),
       expect.anything(),
     );
   });

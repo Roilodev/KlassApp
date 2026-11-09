@@ -5,6 +5,7 @@ import { DatabaseService } from '../database/database.service.js';
 import { SubjectsService } from './subjects.service.js';
 
 const subjectId = 'c0a80123-e89b-42d3-a456-426614174000';
+const gradeId = 'd0a80123-e89b-42d3-a456-426614174000';
 
 function makeService(
   queryHandler: (sql: string) => Promise<{ rows: Record<string, unknown>[]; rowCount: number }>,
@@ -21,49 +22,99 @@ function makeService(
 }
 
 describe('SubjectsService', () => {
-  it('rejects blank names before touching the database', async () => {
+  it('requires a valid name, grade, and weekly frequency', async () => {
     const { service, transaction } = makeService(async () => ({ rows: [], rowCount: 0 }));
     await expect(
-      service.create('school-id', 'user-id', { name: '  ', weeklyFrequency: 1 }),
+      service.create('school-id', 'user-id', {
+        name: '  ',
+        gradeFrequencies: [{ grade: '1º ano', weeklyFrequency: 1 }],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.create('school-id', 'user-id', { name: 'Matemática', gradeFrequencies: [] }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.create('school-id', 'user-id', {
+        name: 'Matemática',
+        gradeFrequencies: [{ grade: '1º ano', weeklyFrequency: 0 }],
+      }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(transaction).not.toHaveBeenCalled();
   });
 
-  it('requires a valid weekly subject frequency', async () => {
+  it('rejects duplicate grade assignments', async () => {
     const { service, transaction } = makeService(async () => ({ rows: [], rowCount: 0 }));
     await expect(
-      service.create('school-id', 'user-id', { name: 'Matemática', weeklyFrequency: 0 }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    await expect(
-      service.create('school-id', 'user-id', { name: 'Matemática', weeklyFrequency: 1.5 }),
+      service.create('school-id', 'user-id', {
+        name: 'Matemática',
+        gradeFrequencies: [
+          { grade: '1º ano', weeklyFrequency: 3 },
+          { grade: '1º ANO', weeklyFrequency: 4 },
+        ],
+      }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(transaction).not.toHaveBeenCalled();
   });
 
-  it('creates a subject and writes an audit record', async () => {
+  it('creates a subject with independent frequencies per grade and audits it', async () => {
     const { service, query } = makeService(async (sql) => {
       if (sql.includes('INSERT INTO school_subjects')) {
         return { rows: [{ id: subjectId }], rowCount: 1 };
+      }
+      if (sql.includes('FROM grades')) {
+        return {
+          rows: [
+            { id: gradeId, name: '1º ano' },
+            { id: 'e0a80123-e89b-42d3-a456-426614174000', name: '2º ano' },
+          ],
+          rowCount: 2,
+        };
       }
       return { rows: [], rowCount: 1 };
     });
 
     await expect(
       service.create('school-id', 'user-id', {
-        name: '  Matemática  ',
-        weeklyFrequency: 4,
+        name: ' Matemática ',
+        gradeFrequencies: [
+          { grade: '1º ano', weeklyFrequency: 4 },
+          { grade: '2º ano', weeklyFrequency: 5 },
+        ],
       }),
     ).resolves.toEqual({
       id: subjectId,
       name: 'Matemática',
-      weeklyFrequency: 4,
+      gradeFrequencies: [
+        { grade: '1º ano', weeklyFrequency: 4 },
+        { grade: '2º ano', weeklyFrequency: 5 },
+      ],
       scheduleCount: 0,
       assessmentCount: 0,
     });
     expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO school_subject_grades'),
+      ['school-id', subjectId, gradeId, 4],
+    );
+    expect(query).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO audit_logs'),
       expect.arrayContaining(['subject.created']),
     );
+  });
+
+  it('rejects unknown grades', async () => {
+    const { service } = makeService(async (sql) => {
+      if (sql.includes('INSERT INTO school_subjects')) {
+        return { rows: [{ id: subjectId }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    });
+
+    await expect(
+      service.create('school-id', 'user-id', {
+        name: 'Matemática',
+        gradeFrequencies: [{ grade: 'Ano inexistente', weeklyFrequency: 4 }],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('reports duplicate subject names clearly', async () => {
@@ -72,14 +123,17 @@ describe('SubjectsService', () => {
     });
 
     await expect(
-      service.create('school-id', 'user-id', { name: 'Matemática', weeklyFrequency: 1 }),
+      service.create('school-id', 'user-id', {
+        name: 'Matemática',
+        gradeFrequencies: [{ grade: '1º ano', weeklyFrequency: 1 }],
+      }),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('prevents deleting subjects linked to schedules or assessments', async () => {
     const { service, query } = makeService(async (sql) => {
-      if (sql.includes('SELECT name, weekly_frequency FROM school_subjects')) {
-        return { rows: [{ name: 'Matemática', weekly_frequency: 4 }], rowCount: 1 };
+      if (sql.includes('SELECT name FROM school_subjects')) {
+        return { rows: [{ name: 'Matemática' }], rowCount: 1 };
       }
       return {
         rows: [{ schedule_count: 1, assessment_count: 0 }],

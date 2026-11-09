@@ -60,10 +60,16 @@ export function AssessmentManagement({
   classes,
   subjects,
 }: AssessmentManagementProps) {
+  const firstClass = classes[0];
+  const firstClassSubjects = firstClass
+    ? subjects.filter((subject) =>
+      subject.gradeFrequencies.some((assignment) => assignment.grade === firstClass.grade),
+    )
+    : [];
   const [assessments, setAssessments] = useState(() => sortAssessments(initialAssessments));
   const [classId, setClassId] = useState(classes[0]?.id ?? "");
   const [title, setTitle] = useState("");
-  const [subjectId, setSubjectId] = useState(subjects[0]?.id ?? "");
+  const [subjectId, setSubjectId] = useState(firstClassSubjects[0]?.id ?? "");
   const [scheduledOn, setScheduledOn] = useState("");
   const [maxPoints, setMaxPoints] = useState("10");
   const [students, setStudents] = useState<StudentResult[]>([]);
@@ -76,6 +82,12 @@ export function AssessmentManagement({
   const [submitting, setSubmitting] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingAssessmentId, setEditingAssessmentId] = useState<string | null>(null);
+  const selectedClass = classes.find((schoolClass) => schoolClass.id === classId);
+  const subjectsForClass = selectedClass
+    ? subjects.filter((subject) =>
+      subject.gradeFrequencies.some((assignment) => assignment.grade === selectedClass.grade),
+    )
+    : [];
 
   function editAssessment(assessment: AssessmentRecord) {
     setEditingAssessmentId(assessment.id);
@@ -93,7 +105,7 @@ export function AssessmentManagement({
     setEditingAssessmentId(null);
     setClassId(classes[0]?.id ?? "");
     setTitle("");
-    setSubjectId(subjects[0]?.id ?? "");
+    setSubjectId(firstClassSubjects[0]?.id ?? "");
     setScheduledOn("");
     setMaxPoints("10");
     setError("");
@@ -146,7 +158,7 @@ export function AssessmentManagement({
         setMessage("Avaliação atualizada.");
       } else {
         setTitle("");
-        setSubjectId(subjects[0]?.id ?? "");
+        setSubjectId(firstClassSubjects[0]?.id ?? "");
         setScheduledOn("");
         setClassId(classes[0]?.id ?? "");
         setMaxPoints("10");
@@ -238,16 +250,26 @@ export function AssessmentManagement({
           title={editingAssessmentId ? "Edite a avaliação" : "Cadastre uma avaliação"}
           titleId="create-assessment-title"
         >
-          {subjects.length === 0 ? (
+          {subjectsForClass.length === 0 ? (
             <p className="subject-required-notice">
-              Nenhuma matéria cadastrada. Peça à administração que cadastre as matérias da escola.
+              Nenhuma matéria está associada ao ano escolar {selectedClass?.grade ?? "desta turma"}. Configure as matérias antes de continuar.
+              <a className="class-submit" href="/materias">Configurar matérias</a>
             </p>
           ) : <form className="assessment-form" onSubmit={saveAssessment}>
             <label>
               Turma
               <select
                 disabled={Boolean(editingAssessmentId)}
-                onChange={(event) => setClassId(event.target.value)}
+                onChange={(event) => {
+                  const nextClassId = event.target.value;
+                  const nextClass = classes.find((schoolClass) => schoolClass.id === nextClassId);
+                  setClassId(nextClassId);
+                  setSubjectId(
+                    subjects.find((subject) =>
+                      subject.gradeFrequencies.some((assignment) => assignment.grade === nextClass?.grade),
+                    )?.id ?? "",
+                  );
+                }}
                 required
                 value={classId}
               >
@@ -275,7 +297,7 @@ export function AssessmentManagement({
                 required
                 value={subjectId}
               >
-                {subjects.map((subject) => (
+                {subjectsForClass.map((subject) => (
                   <option key={subject.id} value={subject.id}>{subject.name}</option>
                 ))}
               </select>
@@ -325,7 +347,11 @@ export function AssessmentManagement({
           <div className="class-list-actions">
             <button
               className="class-submit"
-              disabled={classes.length === 0 || subjects.length === 0}
+              disabled={classes.length === 0 || !classes.some((schoolClass) =>
+                subjects.some((subject) =>
+                  subject.gradeFrequencies.some((assignment) => assignment.grade === schoolClass.grade),
+                ),
+              )}
               onClick={startNewAssessment}
               type="button"
             >

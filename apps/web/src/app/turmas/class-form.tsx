@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { FormEvent } from "react";
+import Link from "next/link";
 import { EntryFormDialog } from "../entry-form-dialog";
 import type { SchoolRecess } from "../school-recess";
 
@@ -50,7 +51,7 @@ export interface ClassSchedule {
 export interface ClassSubject {
   id: string;
   name: string;
-  weeklyFrequency: number | null;
+  gradeFrequencies: Array<{ grade: string; weeklyFrequency: number | null }>;
 }
 
 export interface ClassScheduleTeacher {
@@ -113,6 +114,30 @@ function scheduleTimesOverlap(
 
 function normalizeScheduleTime(time: string) {
   return time.slice(0, 5);
+}
+
+function isClassScheduleComplete(
+  classId: string,
+  grade: string,
+  schedules: ClassSchedule[],
+  subjects: ClassSubject[],
+) {
+  const classSchedules = schedules.filter(
+    (schedule) =>
+      schedule.classId === classId &&
+      Number(schedule.dayOfWeek) >= 1 &&
+      Number(schedule.dayOfWeek) <= weekdays.length,
+  );
+  const gradeSubjects = subjects.flatMap((subject) => {
+    const assignment = subject.gradeFrequencies.find((item) => item.grade === grade);
+    return assignment ? [{ ...subject, weeklyFrequency: assignment.weeklyFrequency }] : [];
+  });
+  return gradeSubjects.length > 0 &&
+    gradeSubjects.every((subject) =>
+      subject.weeklyFrequency !== null &&
+      classSchedules.filter((schedule) => schedule.subjectId === subject.id).length === subject.weeklyFrequency,
+    ) &&
+    classSchedules.every((schedule) => gradeSubjects.some((subject) => subject.id === schedule.subjectId));
 }
 
 function isDeletedScheduleSlot(
@@ -181,21 +206,24 @@ export function ClassForm({
         Number(schedule.dayOfWeek) <= weekdays.length,
     )
     : [];
-  const scheduleFrequencySummary = subjects.flatMap((subject) => {
+  const gradeSubjects = scheduleClass
+    ? subjects.flatMap((subject) => {
+      const assignment = subject.gradeFrequencies.find((item) => item.grade === scheduleClass.grade);
+      return assignment ? [{ ...subject, weeklyFrequency: assignment.weeklyFrequency }] : [];
+    })
+    : [];
+  const scheduleFrequencySummary = gradeSubjects.map((subject) => {
     if (subject.weeklyFrequency === null) {
-      return [];
+      return { id: subject.id, name: subject.name, difference: null };
     }
     const scheduledLessons = scheduleRows.filter((schedule) => schedule.subjectId === subject.id).length;
     const difference = subject.weeklyFrequency - scheduledLessons;
-    return difference === 0 ? [] : [{ id: subject.id, name: subject.name, difference }];
-  });
-  const scheduleMatchesAllFrequencies = subjects.length > 0 &&
-    subjects.every((subject) =>
-      subject.weeklyFrequency !== null &&
-      scheduleRows.filter((schedule) => schedule.subjectId === subject.id).length === subject.weeklyFrequency,
-    ) &&
-    scheduleRows.every((schedule) => subjects.some((subject) => subject.id === schedule.subjectId));
-  const selectedSubjectForNewLesson = subjects.find((subject) => subject.id === addSubjectId);
+    return { id: subject.id, name: subject.name, difference };
+  }).filter((subject) => subject.difference === null || subject.difference !== 0);
+  const scheduleMatchesAllFrequencies = scheduleClass
+    ? isClassScheduleComplete(scheduleClass.id, scheduleClass.grade, schedules, subjects)
+    : false;
+  const selectedSubjectForNewLesson = gradeSubjects.find((subject) => subject.id === addSubjectId);
   const projectedLessonCount = selectedSubjectForNewLesson
     ? scheduleRows.filter((schedule) => schedule.subjectId === selectedSubjectForNewLesson.id).length + 1
     : 0;
@@ -230,7 +258,7 @@ export function ClassForm({
       (teacher) =>
         teacher.status === "active" &&
         teacher.classes.some((assignedClass) => assignedClass.id === addingSlot.classId) &&
-        teacher.subjectIds.some((subjectId) => subjects.some((subject) => subject.id === subjectId)) &&
+        teacher.subjectIds.some((subjectId) => gradeSubjects.some((subject) => subject.id === subjectId)) &&
         !schedules.some(
           (schedule) =>
             schedule.teacherId === teacher.id &&
@@ -508,7 +536,7 @@ export function ClassForm({
       if (result.status === "active") {
         setAddTeacherId(teacher.id);
         setAddSubjectId(
-          teacher.subjectIds.find((id) => subjects.some((subject) => subject.id === id)) ?? "",
+          teacher.subjectIds.find((id) => gradeSubjects.some((subject) => subject.id === id)) ?? "",
         );
       } else {
         setAddTeacherId("");
@@ -929,39 +957,39 @@ export function ClassForm({
                 <p className="class-details-empty">Nenhum professor vinculado a esta turma.</p>
               )}
             </section>
-            <div className="class-details-actions">
-              <button
-                className="class-cancel-edit dialog-print-button"
-                onClick={() => window.print()}
-                type="button"
-              >
-                Imprimir
-              </button>
-              <button
-                className="class-submit"
-                onClick={() => {
-                  setScheduleClassId(selectedClass.id);
-                  setSelectedClassId(null);
-                }}
-                type="button"
-              >
-                Horário
-              </button>
-              <button
-                className="class-submit dialog-edit-button"
-                onClick={() => editClass(selectedClass)}
-                type="button"
-              >
-                Editar turma
-              </button>
-              <button
-                className="class-cancel-edit"
-                onClick={closeClassDetails}
-                type="button"
-              >
-                Fechar
-              </button>
-            </div>
+          </div>
+          <div className="class-details-actions">
+            <button
+              className="class-cancel-edit dialog-print-button"
+              onClick={() => window.print()}
+              type="button"
+            >
+              Imprimir
+            </button>
+            <button
+              className="class-submit"
+              onClick={() => {
+                setScheduleClassId(selectedClass.id);
+                setSelectedClassId(null);
+              }}
+              type="button"
+            >
+              Horário
+            </button>
+            <button
+              className="class-submit dialog-edit-button"
+              onClick={() => editClass(selectedClass)}
+              type="button"
+            >
+              Editar turma
+            </button>
+            <button
+              className="class-cancel-edit"
+              onClick={closeClassDetails}
+              type="button"
+            >
+              Fechar
+            </button>
           </div>
         </EntryFormDialog>
       )}
@@ -1105,7 +1133,9 @@ export function ClassForm({
                 <ul className="weekly-schedule-frequency" aria-label="Matérias a ajustar" aria-live="polite">
                   {scheduleFrequencySummary.map((subject) => (
                     <li key={subject.id}>
-                      {subject.name} ({subject.difference > 0 ? "+" : ""}{subject.difference})
+                      {subject.name} ({subject.difference === null
+                        ? "definir frequência"
+                        : `${subject.difference > 0 ? "+" : ""}${subject.difference}`})
                     </li>
                   ))}
                 </ul>
@@ -1146,9 +1176,12 @@ export function ClassForm({
           titleId="add-schedule-title"
         >
           {scheduleError && <p className="form-message form-error" role="alert">{scheduleError}</p>}
-          {subjects.length === 0 ? (
+          {gradeSubjects.length === 0 ? (
             <>
-              <p className="class-details-empty">Cadastre uma matéria antes de adicionar aulas ao horário.</p>
+              <p className="class-details-empty">
+                Associe matérias ao ano escolar {scheduleClass.grade} antes de adicionar aulas ao horário.
+              </p>
+              <Link className="class-submit" href="/materias">Configurar matérias</Link>
               <div className="dialog-form-actions">
                 <button
                   className="class-cancel-edit"
@@ -1176,7 +1209,7 @@ export function ClassForm({
                         <strong>{teacher.displayName}</strong>
                         <div className="schedule-subject-options">
                           {teacher.subjectIds.map((subjectId) => {
-                            const subject = subjects.find((item) => item.id === subjectId);
+                              const subject = gradeSubjects.find((item) => item.id === subjectId);
                             if (!subject) {
                               return null;
                             }
@@ -1314,13 +1347,18 @@ export function ClassForm({
             </label>
             <label>
               Ano escolar
-              <input
-                maxLength={80}
+              <select
+                disabled={submitting}
                 onChange={(event) => setGrade(event.target.value)}
-                placeholder="Ex.: 4º ano"
                 required
                 value={grade}
-              />
+              >
+                {schoolGrades.map((schoolGrade) => (
+                  <option key={schoolGrade} value={schoolGrade}>
+                    {schoolGrade}
+                  </option>
+                ))}
+              </select>
             </label>
             <label>
               Turma
@@ -1394,6 +1432,12 @@ export function ClassForm({
               .map((schoolClass) => {
                 const gradeColorIndex = schoolGrades.indexOf(schoolClass.grade);
                 const gradeHue = Math.round((gradeColorIndex * 360) / schoolGrades.length);
+                const scheduleComplete = isClassScheduleComplete(
+                  schoolClass.id,
+                  schoolClass.grade,
+                  schedules,
+                  subjects,
+                );
                 return (
                   <li
                     className="class-list-item"
@@ -1404,7 +1448,7 @@ export function ClassForm({
                     }}
                   >
                     <button
-                      aria-label={`Ver detalhes da turma ${schoolClass.name}, ${schoolClass.grade}, ${schoolClass.year}, sessão ${schoolClass.session === "afternoon" ? "Tarde" : "Manhã"}`}
+                      aria-label={`Ver detalhes da turma ${schoolClass.name}, ${schoolClass.grade}, ${schoolClass.year}, sessão ${schoolClass.session === "afternoon" ? "Tarde" : "Manhã"}, horário ${scheduleComplete ? "completo" : "por revisar"}`}
                       className="class-card-button"
                       onClick={() => openClassDetails(schoolClass)}
                       type="button"
@@ -1423,6 +1467,15 @@ export function ClassForm({
                             <path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" />
                           </svg>
                         )}
+                        <span className="class-schedule-indicator">
+                          <svg viewBox="0 0 24 24" fill="none">
+                            <rect x="3.5" y="5.5" width="17" height="15" rx="2" />
+                            <path d="M7.5 3.5v4m9-4v4m-13 3h17" />
+                          </svg>
+                          <span className={scheduleComplete ? "schedule-status-dot" : "schedule-status-cross"}>
+                            {scheduleComplete ? "" : "×"}
+                          </span>
+                        </span>
                       </span>
                       <span
                         className="class-list-icon"

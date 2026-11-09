@@ -176,6 +176,7 @@ export class SchedulesService {
       if (schoolSubject.rowCount !== 1) {
         throw new NotFoundException('A matéria selecionada não foi encontrada.');
       }
+      await this.assertSubjectAssignedToClass(client, schoolId, classId, subjectId);
 
       if (teacherId) {
         const activeTeacher = await client.query(
@@ -300,6 +301,7 @@ export class SchedulesService {
       if (schoolSubject.rowCount !== 1) {
         throw new NotFoundException('A matéria selecionada não foi encontrada.');
       }
+      await this.assertSubjectAssignedToClass(client, schoolId, classId, subjectId);
 
       if (teacherId) {
         const activeTeacher = previous.teacher_id === teacherId
@@ -449,6 +451,31 @@ export class SchedulesService {
     if (!result.rowCount) {
       throw new ConflictException(
         'O horário deve corresponder a um turno configurado para a sessão da turma.',
+      );
+    }
+  }
+
+  private async assertSubjectAssignedToClass(
+    client: PoolClient,
+    schoolId: string,
+    classId: string,
+    subjectId: string,
+  ) {
+    const result = await client.query(
+      `SELECT 1
+       FROM classes
+       JOIN school_subject_grades
+         ON school_subject_grades.school_id = classes.school_id
+        AND school_subject_grades.grade_id = classes.grade_id
+       WHERE classes.school_id = $1
+         AND classes.id = $2
+         AND school_subject_grades.subject_id = $3
+       FOR KEY SHARE OF school_subject_grades`,
+      [schoolId, classId, subjectId],
+    );
+    if (result.rowCount !== 1) {
+      throw new BadRequestException(
+        'A matéria selecionada não está vinculada ao ano escolar desta turma.',
       );
     }
   }

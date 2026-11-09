@@ -9,16 +9,21 @@ const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 interface SubjectManagementProps {
   initialSubjects: SchoolSubject[];
+  grades: string[];
   readOnly?: boolean;
 }
 
 export function SubjectManagement({
   initialSubjects,
+  grades,
   readOnly = false,
 }: SubjectManagementProps) {
   const [subjects, setSubjects] = useState(initialSubjects);
   const [name, setName] = useState("");
-  const [weeklyFrequency, setWeeklyFrequency] = useState("");
+  const [gradeFrequencies, setGradeFrequencies] = useState<Array<{
+    grade: string;
+    weeklyFrequency: string;
+  }>>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -29,7 +34,7 @@ export function SubjectManagement({
   function openNewSubject() {
     setEditingId(null);
     setName("");
-    setWeeklyFrequency("");
+    setGradeFrequencies([]);
     setError("");
     setMessage("");
     setIsFormOpen(true);
@@ -38,7 +43,10 @@ export function SubjectManagement({
   function editSubject(subject: SchoolSubject) {
     setEditingId(subject.id);
     setName(subject.name);
-    setWeeklyFrequency(String(subject.weeklyFrequency ?? ""));
+    setGradeFrequencies(subject.gradeFrequencies.map((assignment) => ({
+      grade: assignment.grade,
+      weeklyFrequency: String(assignment.weeklyFrequency ?? ""),
+    })));
     setError("");
     setMessage("");
     setIsFormOpen(true);
@@ -56,7 +64,13 @@ export function SubjectManagement({
           method: editingId ? "PATCH" : "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, weeklyFrequency: Number(weeklyFrequency) }),
+          body: JSON.stringify({
+            name,
+            gradeFrequencies: gradeFrequencies.map((assignment) => ({
+              grade: assignment.grade,
+              weeklyFrequency: Number(assignment.weeklyFrequency),
+            })),
+          }),
         },
       );
       if (!response.ok) {
@@ -106,7 +120,7 @@ export function SubjectManagement({
     <>
       {!readOnly && isFormOpen && (
         <EntryFormDialog
-          description="As matérias cadastradas podem ser usadas nos horários semanais e nas avaliações."
+          description="Associe cada matéria aos anos escolares em que é oferecida e configure sua frequência semanal por ano."
           eyebrow="CATÁLOGO DA ESCOLA"
           icon="▤"
           isBusy={submitting}
@@ -126,20 +140,94 @@ export function SubjectManagement({
                 value={name}
               />
             </label>
-            <label>
-              Frequência semanal por turma
-              <input
-                max="40"
-                min="1"
-                onChange={(event) => setWeeklyFrequency(event.target.value)}
-                required
-                type="number"
-                value={weeklyFrequency}
-              />
-              <small>Quantidade de aulas desta matéria por semana em cada turma.</small>
-            </label>
+            <fieldset className="subject-grade-frequency-list">
+              <legend>Anos escolares e frequência semanal</legend>
+              {gradeFrequencies.map((assignment, index) => (
+                <div className="subject-grade-frequency-row" key={`${assignment.grade}-${index}`}>
+                  <label>
+                    Ano escolar
+                    <select
+                      onChange={(event) => setGradeFrequencies((current) =>
+                        current.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, grade: event.target.value } : item,
+                        ),
+                      )}
+                      required
+                      value={assignment.grade}
+                    >
+                      <option disabled value="">Selecione um ano</option>
+                      {grades.map((grade) => (
+                        <option
+                          disabled={gradeFrequencies.some(
+                            (item, itemIndex) => itemIndex !== index && item.grade === grade,
+                          )}
+                          key={grade}
+                          value={grade}
+                        >
+                          {grade}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Aulas por semana
+                    <input
+                      max="40"
+                      min="1"
+                      onChange={(event) => setGradeFrequencies((current) =>
+                        current.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? { ...item, weeklyFrequency: event.target.value }
+                            : item,
+                        ),
+                      )}
+                      required
+                      type="number"
+                      value={assignment.weeklyFrequency}
+                    />
+                  </label>
+                  <button
+                    aria-label={`Remover ${assignment.grade || "ano escolar"} da matéria`}
+                    className="subject-grade-remove"
+                    onClick={() => setGradeFrequencies((current) =>
+                      current.filter((_, itemIndex) => itemIndex !== index),
+                    )}
+                    type="button"
+                  >
+                    Remover
+                  </button>
+                </div>
+              ))}
+              <button
+                className="class-cancel-edit subject-grade-add"
+                disabled={gradeFrequencies.length >= grades.length}
+                onClick={() => {
+                  const availableGrade = grades.find(
+                    (grade) => !gradeFrequencies.some((assignment) => assignment.grade === grade),
+                  );
+                  if (availableGrade) {
+                    setGradeFrequencies((current) => [
+                      ...current,
+                      { grade: availableGrade, weeklyFrequency: "" },
+                    ]);
+                  }
+                }}
+                type="button"
+              >
+                Adicionar ano escolar
+              </button>
+              {grades.length === 0 && (
+                <p className="subject-grade-empty">
+                  Cadastre uma turma primeiro para criar anos escolares e associar matérias.
+                </p>
+              )}
+            </fieldset>
             <div className="dialog-form-actions">
-              <button className="class-submit" disabled={submitting} type="submit">
+              <button
+                className="class-submit"
+                disabled={submitting || grades.length === 0 || gradeFrequencies.length === 0}
+                type="submit"
+              >
                 {submitting ? "Salvando..." : editingId ? "Salvar alterações" : "Cadastrar matéria"}
               </button>
               <button
@@ -185,14 +273,18 @@ export function SubjectManagement({
               <li className="subject-list-item" key={subject.id}>
                 <div className="subject-list-copy">
                   <strong>{subject.name}</strong>
+                  <div className="subject-grade-frequencies">
+                    {subject.gradeFrequencies.length > 0
+                      ? subject.gradeFrequencies.map((assignment) => (
+                        <span key={assignment.grade}>
+                          {assignment.grade}: {assignment.weeklyFrequency === null
+                            ? "frequência não definida"
+                            : `${assignment.weeklyFrequency} aulas/semana`}
+                        </span>
+                      ))
+                      : <span>Sem ano escolar associado</span>}
+                  </div>
                   <div className="subject-card-stats">
-                    <span>
-                      <strong>
-                        {subject.weeklyFrequency === null
-                          ? "Definir frequência"
-                          : `${subject.weeklyFrequency} aulas/semana por turma`}
-                      </strong>
-                    </span>
                     <span><strong>{subject.scheduleCount}</strong> horários</span>
                     <span><strong>{subject.assessmentCount}</strong> avaliações</span>
                   </div>

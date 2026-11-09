@@ -232,6 +232,7 @@ export class AssessmentsService {
       if (schoolSubject.rowCount !== 1) {
         throw new NotFoundException('A matéria selecionada não foi encontrada.');
       }
+      await this.assertSubjectAssignedToClass(client, schoolId, input.classId, subjectId);
       const result = await client.query<{ id: string }>(
         `INSERT INTO assessments
            (school_id, class_id, academic_year_id, title, subject_id, scheduled_on, max_points, created_by)
@@ -310,6 +311,7 @@ export class AssessmentsService {
       if (subject.rowCount !== 1) {
         throw new NotFoundException('A matéria selecionada não foi encontrada.');
       }
+      await this.assertSubjectAssignedToClass(client, schoolId, assessment.classId, subjectId);
 
       const resultLimit = await client.query<{ exceeds_maximum: boolean }>(
         `SELECT EXISTS (
@@ -575,6 +577,31 @@ export class AssessmentsService {
       throw new NotFoundException('A avaliação não foi encontrada.');
     }
     return { ...mapAssessment(row), yearId: row.academic_year_id };
+  }
+
+  private async assertSubjectAssignedToClass(
+    client: PoolClient,
+    schoolId: string,
+    classId: string,
+    subjectId: string,
+  ) {
+    const result = await client.query(
+      `SELECT 1
+       FROM classes
+       JOIN school_subject_grades
+         ON school_subject_grades.school_id = classes.school_id
+        AND school_subject_grades.grade_id = classes.grade_id
+       WHERE classes.school_id = $1
+         AND classes.id = $2
+         AND school_subject_grades.subject_id = $3
+       FOR KEY SHARE OF school_subject_grades`,
+      [schoolId, classId, subjectId],
+    );
+    if (result.rowCount !== 1) {
+      throw new BadRequestException(
+        'A matéria selecionada não está vinculada ao ano escolar desta turma.',
+      );
+    }
   }
 
   private async getClass(

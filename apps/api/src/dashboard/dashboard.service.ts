@@ -11,6 +11,7 @@ export interface DashboardSummary {
   requiredTeachers: number | null;
   configuredSubjectFrequencies: number | null;
   schedules: number;
+  classesWithIncompleteSchedules: number | null;
   events: number | null;
   assessments: number;
   behaviorRecords: number;
@@ -43,6 +44,7 @@ interface DashboardSummaryRow {
   required_teachers: number | null;
   configured_subject_frequencies: number | null;
   schedules: number;
+  classes_with_incomplete_schedules: number | null;
   events: number | null;
   assessments: number;
   behavior_records: number;
@@ -116,7 +118,18 @@ export class DashboardService {
          CASE WHEN $3::text = 'admin' THEN (
            SELECT count(*)::integer FROM school_subjects
            WHERE school_subjects.school_id = $1
-             AND school_subjects.weekly_frequency IS NOT NULL
+             AND EXISTS (
+               SELECT 1 FROM school_subject_grades
+               WHERE school_subject_grades.school_id = school_subjects.school_id
+                 AND school_subject_grades.subject_id = school_subjects.id
+                 AND school_subject_grades.weekly_frequency IS NOT NULL
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM school_subject_grades
+               WHERE school_subject_grades.school_id = school_subjects.school_id
+                 AND school_subject_grades.subject_id = school_subjects.id
+                 AND school_subject_grades.weekly_frequency IS NULL
+             )
          ) ELSE NULL END AS configured_subject_frequencies,
          CASE WHEN $3::text = 'admin' THEN (
            SELECT CASE
@@ -126,17 +139,19 @@ export class DashboardService {
            END
            FROM (
              SELECT count(*) FILTER (
-               WHERE school_subjects.weekly_frequency IS NULL
+               WHERE school_subject_grades.weekly_frequency IS NULL
              )::integer AS unconfigured_frequencies,
-                    COALESCE(sum(school_subjects.weekly_frequency * class_count.total), 0)::integer
+                    COALESCE(sum(school_subject_grades.weekly_frequency * class_count.total), 0)::integer
                       AS weekly_lessons
-             FROM school_subjects
-             CROSS JOIN (
-               SELECT count(*)::integer AS total
+             FROM school_subject_grades
+             JOIN (
+               SELECT classes.grade_id, count(*)::integer AS total
                FROM classes
                WHERE classes.school_id = $1
+               GROUP BY classes.grade_id
              ) AS class_count
-             WHERE school_subjects.school_id = $1
+               ON class_count.grade_id = school_subject_grades.grade_id
+             WHERE school_subject_grades.school_id = $1
            ) AS demand
            CROSS JOIN (
              SELECT (
@@ -155,6 +170,44 @@ export class DashboardService {
                  AND teacher_class_assignments.user_id = $2
              ))
          ) AS schedules,
+         CASE WHEN $3::text = 'admin' THEN (
+           SELECT count(*)::integer FROM classes
+           WHERE classes.school_id = $1
+             AND (
+               NOT EXISTS (
+                 SELECT 1 FROM school_subject_grades
+                 WHERE school_subject_grades.school_id = classes.school_id
+                   AND school_subject_grades.grade_id = classes.grade_id
+               )
+               OR EXISTS (
+                 SELECT 1 FROM school_subject_grades
+                 WHERE school_subject_grades.school_id = classes.school_id
+                   AND school_subject_grades.grade_id = classes.grade_id
+                   AND (
+                     school_subject_grades.weekly_frequency IS NULL
+                     OR (
+                       SELECT count(*) FROM class_schedules
+                       WHERE class_schedules.school_id = classes.school_id
+                         AND class_schedules.class_id = classes.id
+                         AND class_schedules.subject_id = school_subject_grades.subject_id
+                         AND class_schedules.day_of_week BETWEEN 1 AND 5
+                     ) <> school_subject_grades.weekly_frequency
+                   )
+               )
+               OR EXISTS (
+                 SELECT 1 FROM class_schedules
+                 WHERE class_schedules.school_id = classes.school_id
+                   AND class_schedules.class_id = classes.id
+                   AND class_schedules.day_of_week BETWEEN 1 AND 5
+                   AND NOT EXISTS (
+                     SELECT 1 FROM school_subject_grades
+                     WHERE school_subject_grades.school_id = classes.school_id
+                       AND school_subject_grades.grade_id = classes.grade_id
+                       AND school_subject_grades.subject_id = class_schedules.subject_id
+                   )
+               )
+             )
+         ) ELSE NULL END AS classes_with_incomplete_schedules,
          CASE WHEN $3::text = 'admin' THEN (
            SELECT count(*)::integer FROM school_events
            WHERE school_events.school_id = $1
@@ -239,6 +292,7 @@ export class DashboardService {
       requiredTeachers: row.required_teachers,
       configuredSubjectFrequencies: row.configured_subject_frequencies,
       schedules: row.schedules,
+      classesWithIncompleteSchedules: row.classes_with_incomplete_schedules,
       events: row.events,
       assessments: row.assessments,
       behaviorRecords: row.behavior_records,

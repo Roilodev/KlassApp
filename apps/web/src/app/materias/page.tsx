@@ -35,14 +35,29 @@ async function SubjectsDashboard() {
   const session = await sessionResponse.json();
   const isAdmin = session.school.role === "admin";
 
-  const response = await fetch(`${apiUrl}/subjects`, { headers, cache: "no-store" });
-  if (response.status === 401 || response.status === 403) {
+  const [response, classesResponse] = await Promise.all([
+    fetch(`${apiUrl}/subjects`, { headers, cache: "no-store" }),
+    isAdmin
+      ? fetch(`${apiUrl}/school-structure/classes`, { headers, cache: "no-store" })
+      : Promise.resolve(null),
+  ]);
+  if (
+    response.status === 401 ||
+    response.status === 403 ||
+    classesResponse?.status === 401 ||
+    classesResponse?.status === 403
+  ) {
     redirect("/login");
   }
-  if (!response.ok) {
+  if (!response.ok || (classesResponse && !classesResponse.ok)) {
     throw new Error("Não foi possível carregar as matérias.");
   }
   const subjects = await response.json() as SchoolSubject[];
+  const classes = classesResponse
+    ? await classesResponse.json() as Array<{ grade: string }>
+    : [];
+  const grades = [...new Set(classes.map((schoolClass) => schoolClass.grade))]
+    .sort((left, right) => left.localeCompare(right));
 
   return (
     <div className="app-shell">
@@ -108,11 +123,11 @@ async function SubjectsDashboard() {
             <p className="eyebrow">BASE DO APRENDIZADO <span aria-hidden="true">✦</span></p>
             <h1>Matérias da escola <span aria-hidden="true">📚</span></h1>
             <p className="welcome-copy">
-              Mantenha um catálogo único e use as matérias nos horários e nas avaliações.
+              Associe matérias e frequências semanais a cada ano escolar para usá-las nos horários.
             </p>
           </div>
         </section>
-        <SubjectManagement initialSubjects={subjects} readOnly={!isAdmin} />
+        <SubjectManagement initialSubjects={subjects} grades={grades} readOnly={!isAdmin} />
         <footer className="page-footer">
           <span>Feito com carinho para a comunidade escolar</span>
           <span aria-hidden="true">♥</span>

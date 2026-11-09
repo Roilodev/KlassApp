@@ -236,6 +236,20 @@ button {
   overflow-wrap: anywhere;
 }
 
+.subject-grade-frequencies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.subject-grade-frequencies > span {
+  padding: 4px 7px;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 72%);
+  color: #5e687b;
+  font-size: 11px;
+}
+
 .subject-card-stats {
   display: flex;
   grid-column: 1 / -1;
@@ -307,6 +321,63 @@ button {
   border-radius: 9px;
   color: var(--ink);
   font: inherit;
+}
+
+.subject-form select {
+  width: 100%;
+  min-height: 43px;
+  padding: 0 12px;
+  border: 1px solid #dfe2eb;
+  border-radius: 9px;
+  background: white;
+  color: var(--ink);
+  font: inherit;
+}
+
+.subject-grade-frequency-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid #e8e4f0;
+  border-radius: 12px;
+}
+
+.subject-grade-frequency-list legend {
+  padding: 0 5px;
+  color: #435067;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.subject-grade-frequency-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr) auto;
+  align-items: end;
+  gap: 9px;
+}
+
+.subject-grade-remove {
+  min-height: 43px;
+  padding: 0 10px;
+  border: 1px solid #ead8d5;
+  border-radius: 9px;
+  background: #fff6f4;
+  color: #a64d4b;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.subject-grade-add {
+  justify-self: start;
+}
+
+.subject-grade-empty {
+  margin: 0;
+  color: #727d91;
+  font-size: 13px;
 }
 
 .subject-required-notice {
@@ -728,10 +799,8 @@ h1 span {
   padding: 18px 22px;
   border: 1px solid #e4d9f4;
   border-radius: 17px;
-  background:
-    radial-gradient(circle at 90% 15%, rgb(255 255 255 / 75%) 0 2px, transparent 3px),
-    linear-gradient(110deg, #f8f3ff 0%, #f0e9fb 100%);
-  box-shadow: 0 9px 22px rgb(82 59 115 / 9%);
+  background: #fff;
+  box-shadow: 0 9px 22px rgb(82 59 115 / 6%);
 }
 
 .setup-flow-heading {
@@ -800,6 +869,18 @@ h1 span {
   text-decoration: none;
 }
 
+.setup-flow-item.ready {
+  border-radius: 10px;
+  background: #f0f8f2;
+  color: #34734d;
+}
+
+.setup-flow-item.pending {
+  border-radius: 10px;
+  background: #fff2f0;
+  color: #a63d38;
+}
+
 .setup-flow-icon {
   display: grid;
   width: 34px;
@@ -810,6 +891,16 @@ h1 span {
   background: #e5d8f4;
   color: #68458f;
   font-size: 17px;
+}
+
+.setup-flow-item.ready .setup-flow-icon {
+  background: #dcefe1;
+  color: #34734d;
+}
+
+.setup-flow-item.pending .setup-flow-icon {
+  background: #fae0dc;
+  color: #a63d38;
 }
 
 .setup-flow-copy {
@@ -839,14 +930,12 @@ h1 span {
   flex: 0 0 auto;
   padding: 4px 8px;
   border-radius: 999px;
-  background: #e8e1ef;
-  color: #62566f;
+  color: #a63d38;
   font-size: 10px;
   font-weight: 700;
 }
 
 .setup-step-status.ready {
-  background: #e1f1e7;
   color: #34734d;
 }
 
@@ -926,7 +1015,9 @@ h1 span {
   font-weight: 700;
 }
 
-.class-form input {
+.class-form input,
+.class-form select {
+  box-sizing: border-box;
   width: 100%;
   min-height: 41px;
   padding: 0 11px;
@@ -965,7 +1056,11 @@ h1 span {
 }
 
 .class-edit-dialog-form {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.entry-form-dialog:has(.class-edit-dialog-form) {
+  width: min(460px, 100%);
 }
 
 .class-create-dialog-form {
@@ -3093,10 +3188,9 @@ h1 span {
   position: absolute;
   top: 9px;
   right: 10px;
-  display: grid;
-  width: 18px;
-  height: 18px;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  gap: 5px;
   color: #a76d13;
   pointer-events: none;
 }
@@ -3112,6 +3206,52 @@ h1 span {
 
 .class-session-indicator-afternoon {
   color: #53658f;
+}
+
+.class-schedule-indicator {
+  position: relative;
+  display: grid;
+  width: 16px;
+  height: 17px;
+  place-items: center;
+  color: #69758a;
+}
+
+.class-schedule-indicator > svg {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.schedule-status-dot,
+.schedule-status-cross {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  display: grid;
+  width: 8px;
+  height: 8px;
+  place-items: center;
+  border: 1px solid white;
+  border-radius: 50%;
+}
+
+.schedule-status-dot {
+  background: #2c9b5b;
+}
+
+.schedule-status-cross {
+  width: 10px;
+  height: 10px;
+  border: 0;
+  background: white;
+  color: #d33b36;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 10px;
 }
 
 .class-card-button:focus-visible {
@@ -3134,7 +3274,16 @@ h1 span {
 }
 
 .class-details {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
   margin-top: 22px;
+}
+
+.entry-form-dialog.class-details-print-dialog {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .entry-form-dialog.weekly-schedule-dialog {
@@ -3418,9 +3567,7 @@ h1 span {
 
 .class-details-roster {
   display: grid;
-  max-height: min(42vh, 360px);
   gap: 0;
-  overflow-y: auto;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -3441,11 +3588,15 @@ h1 span {
 }
 
 .class-details-actions {
+  flex: 0 0 auto;
   display: flex;
   flex-wrap: wrap;
   gap: 9px;
   justify-content: flex-end;
-  margin-top: 20px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #eee8df;
+  background: #fff;
 }
 
 .profile-dialog-actions {
@@ -3614,6 +3765,7 @@ h1 span {
 
   .class-details-print-dialog {
     position: absolute;
+    display: block;
     inset: 0 auto auto 0;
     width: 100%;
     max-height: none;
@@ -3621,6 +3773,10 @@ h1 span {
     padding: 0;
     border: 0;
     box-shadow: none;
+  }
+
+  .class-details-print-dialog .class-details {
+    overflow: visible;
   }
 
   .class-details-print-dialog .class-details-actions {
@@ -6605,6 +6761,19 @@ h1 span {
 }
 
 @media (max-width: 700px) {
+  .class-edit-dialog-form {
+    grid-template-columns: 1fr;
+  }
+
+  .subject-grade-frequency-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr);
+  }
+
+  .subject-grade-remove {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
   .setup-flow {
     gap: 12px;
     padding: 16px;
