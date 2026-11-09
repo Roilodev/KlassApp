@@ -84,10 +84,6 @@ async function AssessmentsDashboard() {
                 <span className="nav-icon" aria-hidden="true">♧</span>
                 <span>Alunos</span>
               </Link>
-              <Link className="nav-item" href="/horarios">
-                <span className="nav-icon" aria-hidden="true">◷</span>
-                <span>Horários</span>
-              </Link>
               <Link className="nav-item" href="/materias">
                 <span className="nav-icon" aria-hidden="true">▤</span>
                 <span>Matérias</span>
@@ -127,17 +123,6 @@ async function AssessmentsDashboard() {
             <LogoutButton />
           </div>
         </header>
-
-        <section className="welcome-section classes-welcome">
-          <div>
-            <p className="eyebrow">CADA APRENDIZADO CONTA <span aria-hidden="true">✦</span></p>
-            <h1>Avaliações e resultados <span aria-hidden="true">✏️</span></h1>
-            <p className="welcome-copy">
-              Organize as avaliações e acompanhe os pontos conquistados por cada estudante.
-            </p>
-          </div>
-          <SectionIllustration kind="assessments" />
-        </section>
 
         <AssessmentManagement
           initialAssessments={assessments}

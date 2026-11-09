@@ -76,6 +76,7 @@ export function PersonPhotoAvatar({
       try {
         const response = await fetch(photoUrl, {
           credentials: "include",
+          cache: "no-store",
           signal: controller.signal,
         });
         if (response.status === 404) {
@@ -161,6 +162,7 @@ export function PersonPhoto({
       try {
         const response = await fetch(photoUrl, {
           credentials: "include",
+          cache: "no-store",
           signal: controller.signal,
         });
         if (response.status === 404) {

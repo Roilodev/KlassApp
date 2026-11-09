@@ -73,10 +73,6 @@ async function BehaviorDashboard() {
                 <span className="nav-icon" aria-hidden="true">♧</span>
                 <span>Alunos</span>
               </Link>
-              <Link className="nav-item" href="/horarios">
-                <span className="nav-icon" aria-hidden="true">◷</span>
-                <span>Horários</span>
-              </Link>
               <Link className="nav-item" href="/materias">
                 <span className="nav-icon" aria-hidden="true">▤</span>
                 <span>Matérias</span>
@@ -116,17 +112,6 @@ async function BehaviorDashboard() {
             <LogoutButton />
           </div>
         </header>
-
-        <section className="welcome-section classes-welcome">
-          <div>
-            <p className="eyebrow">CADA CRIANÇA TEM SUA HISTÓRIA <span aria-hidden="true">✦</span></p>
-            <h1>Registros de acompanhamento <span aria-hidden="true">🌱</span></h1>
-            <p className="welcome-copy">
-              Registre fatos concretos do dia a dia para acompanhar o desenvolvimento de cada estudante.
-            </p>
-          </div>
-          <SectionIllustration kind="behavior" />
-        </section>
 
         <BehaviorManagement
           classes={classes}

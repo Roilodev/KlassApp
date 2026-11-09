@@ -11,7 +11,6 @@ const navigation = [
   { label: "Turmas", icon: "▦", href: "/turmas" },
   { label: "Professores", icon: "♙", href: "/professores" },
   { label: "Alunos", icon: "♧", href: "/alunos" },
-  { label: "Horários", icon: "◷", href: "/horarios" },
   { label: "Matérias", icon: "▤", href: "/materias" },
   { label: "Eventos", icon: "▣", href: "/eventos" },
   { label: "Avaliações", icon: "✎", href: "/avaliacoes" },
@@ -36,12 +35,19 @@ interface DashboardSummary {
   classes: number;
   subjects: number;
   teachers: number | null;
+  activeTeachers: number | null;
+  requiredTeachers: number | null;
+  configuredSubjectFrequencies: number | null;
   schedules: number;
   events: number | null;
   assessments: number;
   behaviorRecords: number;
   studentsMissingResponsible: number | null;
   activeAssignedTeachers: number | null;
+  configuredEvents: number | null;
+  morningSessionPeriods: number | null;
+  afternoonSessionPeriods: number | null;
+  configuredStudents: number | null;
 }
 
 interface NextEvent {
@@ -54,7 +60,7 @@ interface NextEvent {
 
 interface SetupProgressItem {
   label: string;
-  href: string;
+  icon: string;
   ready: boolean;
 }
 
@@ -122,18 +128,34 @@ function formatNextEventDate(event: NextEvent): string {
 
 function getSetupProgress(summary: DashboardSummary): SetupProgressItem[] {
   return [
-    { label: "Turmas cadastradas", href: "/turmas", ready: summary.classes > 0 },
     {
-      label: "Professores ativos vinculados às turmas",
-      href: "/professores",
-      ready: (summary.activeAssignedTeachers ?? 0) > 0,
+      label: "Sessões e turnos",
+      icon: "◷",
+      ready: (summary.morningSessionPeriods ?? 0) > 0 &&
+        (summary.afternoonSessionPeriods ?? 0) > 0,
     },
     {
-      label: "Alunos com responsável cadastrado",
-      href: "/alunos",
-      ready: summary.students > 0 && summary.studentsMissingResponsible === 0,
+      label: summary.requiredTeachers === null
+        ? "Professores"
+        : `Professores (${summary.activeTeachers ?? 0} de ${summary.requiredTeachers})`,
+      icon: "♙",
+      ready: (summary.activeTeachers ?? 0) > 0 &&
+        summary.requiredTeachers !== null &&
+        (summary.activeTeachers ?? 0) >= summary.requiredTeachers,
     },
-    { label: "Horários semanais cadastrados", href: "/horarios", ready: summary.schedules > 0 },
+    {
+      label: "Alunos",
+      icon: "♧",
+      ready: (summary.configuredStudents ?? 0) > 0,
+    },
+    {
+      label: "Disciplinas",
+      icon: "▤",
+      ready: summary.subjects > 0 &&
+        summary.configuredSubjectFrequencies === summary.subjects,
+    },
+    { label: "Horários", icon: "◷", ready: summary.schedules > 0 },
+    { label: "Eventos", icon: "▣", ready: (summary.configuredEvents ?? 0) > 0 },
   ];
 }
 
@@ -185,7 +207,6 @@ async function Dashboard() {
   const setupPercent = setupItems.length
     ? Math.round((configuredCount / setupItems.length) * 100)
     : 0;
-  const nextSetupItem = setupItems.find((item) => !item.ready);
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -241,6 +262,34 @@ async function Dashboard() {
             </div>
           </div>
         </header>
+
+        {session.school.role === "admin" && setupItems.some((item) => !item.ready) && (
+          <section className="setup-flow" aria-labelledby="setup-title">
+            <div className="setup-flow-heading">
+              <span className="dashboard-live-dot" aria-hidden="true" />
+              <div>
+                <h2 id="setup-title">Configuração inicial</h2>
+              </div>
+              <strong className="setup-flow-progress">{setupPercent}%</strong>
+            </div>
+            <ol className="setup-flow-list">
+              {setupItems.map((item, index) => (
+                <li key={item.label}>
+                  <div className="setup-flow-item">
+                    <span className="setup-flow-icon" aria-hidden="true">{item.icon}</span>
+                    <span className="setup-flow-copy">
+                      <small>ETAPA {index + 1}</small>
+                      <strong>{item.label}</strong>
+                    </span>
+                    <span className={item.ready ? "setup-step-status ready" : "setup-step-status"}>
+                      {item.ready ? "Concluído" : "Pendente"}
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
 
         {nextEvent && (
           <section className="welcome-section dashboard-hero">
@@ -393,48 +442,6 @@ async function Dashboard() {
             </Link>
           )}
         </section>        
-
-        {session.school.role === "admin" && setupPercent < 100 && (
-          <section className="setup-card" aria-labelledby="setup-title">
-            <div className="setup-icon" aria-hidden="true">✎</div>
-            <div className="setup-text">
-              <p className="card-kicker">PRIMEIROS PASSOS</p>
-              <h2 id="setup-title">Configuração fundamental da escola</h2>
-              <ul className="setup-checklist">
-                {setupItems.map((item) => (
-                  <li key={item.label}>
-                    <span className={item.ready ? "setup-check ready" : "setup-check"} aria-hidden="true">
-                      {item.ready ? "✓" : "○"}
-                    </span>
-                    <Link href={item.href}>{item.label}</Link>
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div
-              className="setup-progress"
-              aria-label={`${setupPercent}% da configuração fundamental concluída`}
-            >
-              <strong>{setupPercent}%</strong>
-              <div
-                className="progress-track"
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={setupPercent}
-                aria-label="Configuração fundamental concluída"
-              >
-                <span style={{ width: `${setupPercent}%` }} />
-              </div>
-              <small>{configuredCount} de {setupItems.length} itens configurados</small>
-              {nextSetupItem && (
-                <Link className="setup-link" href={nextSetupItem.href}>
-                  Configurar próximo item <span aria-hidden="true">→</span>
-                </Link>
-              )}
-            </div>
-          </section>
-        )}
 
         {session.school.role === "admin" && (
           <section className="dashboard-observations" aria-labelledby="dashboard-observations-title">

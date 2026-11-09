@@ -12,23 +12,32 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 export interface SchoolSubject {
   id: string;
   name: string;
+  weeklyFrequency: number | null;
   scheduleCount: number;
   assessmentCount: number;
 }
 
 export interface SaveSubjectInput {
   name: string;
+  weeklyFrequency: number;
 }
 
-function validateSubjectInput(input: SaveSubjectInput): string {
-  if (!input || typeof input !== 'object' || typeof input.name !== 'string') {
-    throw new BadRequestException('Informe o nome da matéria.');
+function validateSubjectInput(input: SaveSubjectInput): { name: string; weeklyFrequency: number } {
+  if (
+    !input ||
+    typeof input !== 'object' ||
+    typeof input.name !== 'string' ||
+    !Number.isInteger(input.weeklyFrequency) ||
+    input.weeklyFrequency < 1 ||
+    input.weeklyFrequency > 40
+  ) {
+    throw new BadRequestException('Informe o nome e a frequência semanal da matéria (de 1 a 40 aulas).');
   }
   const name = input.name.trim();
   if (name.length < 1 || name.length > 80) {
     throw new BadRequestException('A matéria deve ter entre 1 e 80 caracteres.');
   }
-  return name;
+  return { name, weeklyFrequency: input.weeklyFrequency };
 }
 
 @Injectable()
@@ -39,10 +48,11 @@ export class SubjectsService {
     const result = await this.database.query<{
       id: string;
       name: string;
+      weekly_frequency: number | null;
       schedule_count: number;
       assessment_count: number;
     }>(
-      `SELECT school_subjects.id, school_subjects.name,
+      `SELECT school_subjects.id, school_subjects.name, school_subjects.weekly_frequency,
               count(DISTINCT class_schedules.id)::integer AS schedule_count,
               count(DISTINCT assessments.id)::integer AS assessment_count
        FROM school_subjects
@@ -60,6 +70,7 @@ export class SubjectsService {
     return result.rows.map((row) => ({
       id: row.id,
       name: row.name,
+      weeklyFrequency: row.weekly_frequency,
       scheduleCount: row.schedule_count,
       assessmentCount: row.assessment_count,
     }));
@@ -70,21 +81,24 @@ export class SubjectsService {
     createdBy: string,
     input: SaveSubjectInput,
   ): Promise<SchoolSubject> {
-    const name = validateSubjectInput(input);
+    const { name, weeklyFrequency } = validateSubjectInput(input);
     try {
       return await this.database.transaction(async (client) => {
         const inserted = await client.query<{ id: string }>(
-          `INSERT INTO school_subjects (school_id, name, created_by)
-           VALUES ($1, $2, $3)
+          `INSERT INTO school_subjects (school_id, name, created_by, weekly_frequency)
+           VALUES ($1, $2, $3, $4)
            RETURNING id`,
-          [schoolId, name, createdBy],
+          [schoolId, name, createdBy, weeklyFrequency],
         );
         const subjectId = inserted.rows[0]?.id;
         if (!subjectId) {
           throw new Error('Não foi possível salvar a matéria.');
         }
-        await this.audit(client, schoolId, createdBy, 'subject.created', subjectId, { name });
-        return { id: subjectId, name, scheduleCount: 0, assessmentCount: 0 };
+        await this.audit(client, schoolId, createdBy, 'subject.created', subjectId, {
+          name,
+          weeklyFrequency,
+        });
+        return { id: subjectId, name, weeklyFrequency, scheduleCount: 0, assessmentCount: 0 };
       });
     } catch (error) {
       if (isUniqueViolation(error)) {
@@ -103,23 +117,31 @@ export class SubjectsService {
     if (!UUID_PATTERN.test(subjectId)) {
       throw new BadRequestException('Matéria inválida.');
     }
-    const name = validateSubjectInput(input);
+    const { name, weeklyFrequency } = validateSubjectInput(input);
     try {
       return await this.database.transaction(async (client) => {
-        const result = await client.query<{ id: string; name: string }>(
+        const result = await client.query<{ id: string; name: string; weekly_frequency: number }>(
           `UPDATE school_subjects
-           SET name = $3
+           SET name = $3, weekly_frequency = $4
            WHERE school_id = $1 AND id = $2
-           RETURNING id, name`,
-          [schoolId, subjectId, name],
+           RETURNING id, name, weekly_frequency`,
+          [schoolId, subjectId, name, weeklyFrequency],
         );
         const updated = result.rows[0];
         if (!updated) {
           throw new NotFoundException('Matéria não encontrada.');
         }
-        await this.audit(client, schoolId, updatedBy, 'subject.updated', subjectId, { name });
+        await this.audit(client, schoolId, updatedBy, 'subject.updated', subjectId, {
+          name,
+          weeklyFrequency,
+        });
         const counts = await this.countUsage(client, schoolId, subjectId);
-        return { ...updated, ...counts };
+        return {
+          id: updated.id,
+          name: updated.name,
+          weeklyFrequency: updated.weekly_frequency,
+          ...counts,
+        };
       });
     } catch (error) {
       if (isUniqueViolation(error)) {
@@ -139,8 +161,8 @@ export class SubjectsService {
     }
     try {
       return await this.database.transaction(async (client) => {
-        const existing = await client.query<{ name: string }>(
-          `SELECT name FROM school_subjects
+        const existing = await client.query<{ name: string; weekly_frequency: number | null }>(
+          `SELECT name, weekly_frequency FROM school_subjects
            WHERE school_id = $1 AND id = $2
            FOR UPDATE`,
           [schoolId, subjectId],
@@ -159,6 +181,7 @@ export class SubjectsService {
         );
         await this.audit(client, schoolId, removedBy, 'subject.deleted', subjectId, {
           name: subject.name,
+          weeklyFrequency: subject.weekly_frequency,
         });
         return { deleted: true };
       });
@@ -199,7 +222,7 @@ export class SubjectsService {
     actorId: string,
     action: string,
     subjectId: string,
-    details: { name: string },
+    details: { name: string; weeklyFrequency: number | null },
   ) {
     return client.query(
       `INSERT INTO audit_logs (school_id, actor_id, action, entity_type, entity_id, details)

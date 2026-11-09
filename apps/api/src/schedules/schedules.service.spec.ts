@@ -59,6 +59,9 @@ describe('SchedulesService', () => {
       if (sql.includes('SELECT id FROM school_subjects')) {
         return { rows: [{ id: validInput.subjectId }], rowCount: 1 };
       }
+      if (sql.includes('JOIN school_class_session_periods')) {
+        return { rows: [{}], rowCount: 1 };
+      }
       if (sql.includes('SELECT bool_or')) {
         return {
           rows: [{ class_conflict: false, teacher_conflict: false }],
@@ -114,7 +117,7 @@ describe('SchedulesService', () => {
     );
   });
 
-  it('requires an assigned subject for the selected teacher', async () => {
+  it('rejects a teacher who is not active in the school', async () => {
     const teacherId = '323e4567-e89b-42d3-a456-426614174000';
     const queryHandler = vi.fn(async (sql: string) => {
       if (sql.includes('pg_advisory_xact_lock')) {
@@ -126,7 +129,7 @@ describe('SchedulesService', () => {
       if (sql.includes('SELECT id FROM school_subjects')) {
         return { rows: [{ id: validInput.subjectId }], rowCount: 1 };
       }
-      if (sql.includes('teacher_subject_assignments')) {
+      if (sql.includes('FROM school_memberships')) {
         return { rows: [], rowCount: 0 };
       }
       return { rows: [], rowCount: 1 };
@@ -144,6 +147,34 @@ describe('SchedulesService', () => {
     );
   });
 
+  it('rejects schedule times that are not configured for the class session', async () => {
+    const queryHandler = vi.fn(async (sql: string) => {
+      if (sql.includes('pg_advisory_xact_lock')) {
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('SELECT id FROM classes')) {
+        return { rows: [{ id: validInput.classId }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT id FROM school_subjects')) {
+        return { rows: [{ id: validInput.subjectId }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    });
+    const { service, query } = makeService(queryHandler);
+
+    await expect(
+      service.create('school-id', 'user-id', validInput),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('JOIN school_class_session_periods'),
+      ['school-id', validInput.classId, validInput.startsAt, validInput.endsAt],
+    );
+    expect(query).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO class_schedules'),
+      expect.anything(),
+    );
+  });
+
   it('rejects a weekday class schedule during the school recess', async () => {
     const queryHandler = vi.fn(async (sql: string) => {
       if (sql.includes('pg_advisory_xact_lock')) {
@@ -154,6 +185,9 @@ describe('SchedulesService', () => {
       }
       if (sql.includes('SELECT id FROM school_subjects')) {
         return { rows: [{ id: validInput.subjectId }], rowCount: 1 };
+      }
+      if (sql.includes('JOIN school_class_session_periods')) {
+        return { rows: [{}], rowCount: 1 };
       }
       if (sql.includes('FROM school_recesses')) {
         return {
@@ -175,7 +209,44 @@ describe('SchedulesService', () => {
     );
   });
 
-  it('creates a schedule when the teacher is assigned to its subject and class', async () => {
+  it('rejects a weekday class schedule during the afternoon recess', async () => {
+    const queryHandler = vi.fn(async (sql: string) => {
+      if (sql.includes('pg_advisory_xact_lock')) {
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('SELECT id FROM classes')) {
+        return { rows: [{ id: validInput.classId }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT id FROM school_subjects')) {
+        return { rows: [{ id: validInput.subjectId }], rowCount: 1 };
+      }
+      if (sql.includes('JOIN school_class_session_periods')) {
+        return { rows: [{}], rowCount: 1 };
+      }
+      if (sql.includes('FROM school_recesses')) {
+        return {
+          rows: [{ starts_at: '15:00:00', ends_at: '15:20:00' }],
+          rowCount: 1,
+        };
+      }
+      return { rows: [], rowCount: 0 };
+    });
+    const { service, query } = makeService(queryHandler);
+
+    await expect(
+      service.create('school-id', 'user-id', {
+        ...validInput,
+        startsAt: '15:10',
+        endsAt: '15:50',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(query).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO class_schedules'),
+      expect.anything(),
+    );
+  });
+
+  it('creates a schedule with any active teacher in the school', async () => {
     const teacherId = '323e4567-e89b-42d3-a456-426614174000';
     const queryHandler = vi.fn(async (sql: string) => {
       if (sql.includes('pg_advisory_xact_lock')) {
@@ -187,8 +258,11 @@ describe('SchedulesService', () => {
       if (sql.includes('SELECT id FROM school_subjects')) {
         return { rows: [{ id: validInput.subjectId }], rowCount: 1 };
       }
-      if (sql.includes('teacher_subject_assignments')) {
+      if (sql.includes('FROM school_memberships')) {
         return { rows: [{ '?column?': 1 }], rowCount: 1 };
+      }
+      if (sql.includes('JOIN school_class_session_periods')) {
+        return { rows: [{}], rowCount: 1 };
       }
       if (sql.includes('SELECT bool_or')) {
         return {
@@ -223,8 +297,8 @@ describe('SchedulesService', () => {
       teacherId,
     })).resolves.toMatchObject({ teacherId, teacherName: 'Professora' });
     expect(query).toHaveBeenCalledWith(
-      expect.stringContaining('teacher_subject_assignments.subject_id = $4'),
-      ['school-id', validInput.classId, teacherId, validInput.subjectId],
+      expect.stringContaining("role = 'teacher' AND is_active = true"),
+      ['school-id', teacherId],
     );
   });
 
@@ -281,6 +355,9 @@ describe('SchedulesService', () => {
       }
       if (sql.includes('SELECT id FROM school_subjects')) {
         return { rows: [{ id: validInput.subjectId }], rowCount: 1 };
+      }
+      if (sql.includes('JOIN school_class_session_periods')) {
+        return { rows: [{}], rowCount: 1 };
       }
       if (sql.includes('SELECT bool_or')) {
         return {

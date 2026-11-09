@@ -82,10 +82,6 @@ async function EventsDashboard() {
             <span className="nav-icon" aria-hidden="true">♧</span>
             <span>Alunos</span>
           </Link>
-          <Link className="nav-item" href="/horarios">
-            <span className="nav-icon" aria-hidden="true">◷</span>
-            <span>Horários</span>
-          </Link>
           <Link className="nav-item" href="/materias">
             <span className="nav-icon" aria-hidden="true">▤</span>
             <span>Matérias</span>

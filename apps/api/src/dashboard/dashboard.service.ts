@@ -7,12 +7,19 @@ export interface DashboardSummary {
   classes: number;
   subjects: number;
   teachers: number | null;
+  activeTeachers: number | null;
+  requiredTeachers: number | null;
+  configuredSubjectFrequencies: number | null;
   schedules: number;
   events: number | null;
   assessments: number;
   behaviorRecords: number;
   studentsMissingResponsible: number | null;
   activeAssignedTeachers: number | null;
+  configuredEvents: number | null;
+  morningSessionPeriods: number | null;
+  afternoonSessionPeriods: number | null;
+  configuredStudents: number | null;
 }
 
 export interface DashboardObservation {
@@ -32,12 +39,19 @@ interface DashboardSummaryRow {
   classes: number;
   subjects: number;
   teachers: number | null;
+  active_teachers: number | null;
+  required_teachers: number | null;
+  configured_subject_frequencies: number | null;
   schedules: number;
   events: number | null;
   assessments: number;
   behavior_records: number;
   students_missing_responsible: number | null;
   active_assigned_teachers: number | null;
+  configured_events: number | null;
+  morning_session_periods: number | null;
+  afternoon_session_periods: number | null;
+  configured_students: number | null;
 }
 
 @Injectable()
@@ -93,6 +107,44 @@ export class DashboardService {
                AND teacher_invitations.expires_at > now()
            )
          )::integer ELSE NULL END AS teachers,
+         CASE WHEN $3::text = 'admin' THEN (
+           SELECT count(*)::integer FROM school_memberships
+           WHERE school_memberships.school_id = $1
+             AND school_memberships.role = 'teacher'
+             AND school_memberships.is_active = true
+         ) ELSE NULL END AS active_teachers,
+         CASE WHEN $3::text = 'admin' THEN (
+           SELECT count(*)::integer FROM school_subjects
+           WHERE school_subjects.school_id = $1
+             AND school_subjects.weekly_frequency IS NOT NULL
+         ) ELSE NULL END AS configured_subject_frequencies,
+         CASE WHEN $3::text = 'admin' THEN (
+           SELECT CASE
+             WHEN demand.unconfigured_frequencies > 0 OR capacity.weekly_periods = 0 THEN NULL
+             WHEN demand.weekly_lessons = 0 THEN 1
+             ELSE greatest(1, ceil(demand.weekly_lessons::numeric / capacity.weekly_periods)::integer)
+           END
+           FROM (
+             SELECT count(*) FILTER (
+               WHERE school_subjects.weekly_frequency IS NULL
+             )::integer AS unconfigured_frequencies,
+                    COALESCE(sum(school_subjects.weekly_frequency * class_count.total), 0)::integer
+                      AS weekly_lessons
+             FROM school_subjects
+             CROSS JOIN (
+               SELECT count(*)::integer AS total
+               FROM classes
+               WHERE classes.school_id = $1
+             ) AS class_count
+             WHERE school_subjects.school_id = $1
+           ) AS demand
+           CROSS JOIN (
+             SELECT (
+               SELECT count(*) FROM school_class_session_periods
+               WHERE school_id = $1
+             ) * 5 AS weekly_periods
+           ) AS capacity
+         ) ELSE NULL END AS required_teachers,
          (
            SELECT count(*)::integer FROM class_schedules
            WHERE class_schedules.school_id = $1
@@ -108,6 +160,24 @@ export class DashboardService {
            WHERE school_events.school_id = $1
              AND school_events.status <> 'draft'
          ) ELSE NULL END AS events,
+         CASE WHEN $3::text = 'admin' THEN (
+           SELECT count(*)::integer FROM school_events
+           WHERE school_events.school_id = $1
+         ) ELSE NULL END AS configured_events,
+         CASE WHEN $3::text = 'admin' THEN (
+           SELECT count(*)::integer FROM school_class_session_periods
+           WHERE school_class_session_periods.school_id = $1
+             AND school_class_session_periods.session = 'morning'
+         ) ELSE NULL END AS morning_session_periods,
+         CASE WHEN $3::text = 'admin' THEN (
+           SELECT count(*)::integer FROM school_class_session_periods
+           WHERE school_class_session_periods.school_id = $1
+             AND school_class_session_periods.session = 'afternoon'
+         ) ELSE NULL END AS afternoon_session_periods,
+         CASE WHEN $3::text = 'admin' THEN (
+           SELECT count(*)::integer FROM students
+           WHERE students.school_id = $1
+         ) ELSE NULL END AS configured_students,
          (
            SELECT count(*)::integer FROM assessments
            WHERE assessments.school_id = $1
@@ -165,12 +235,19 @@ export class DashboardService {
       classes: row.classes,
       subjects: row.subjects,
       teachers: row.teachers,
+      activeTeachers: row.active_teachers,
+      requiredTeachers: row.required_teachers,
+      configuredSubjectFrequencies: row.configured_subject_frequencies,
       schedules: row.schedules,
       events: row.events,
       assessments: row.assessments,
       behaviorRecords: row.behavior_records,
       studentsMissingResponsible: row.students_missing_responsible,
       activeAssignedTeachers: row.active_assigned_teachers,
+      configuredEvents: row.configured_events,
+      morningSessionPeriods: row.morning_session_periods,
+      afternoonSessionPeriods: row.afternoon_session_periods,
+      configuredStudents: row.configured_students,
     };
   }
 

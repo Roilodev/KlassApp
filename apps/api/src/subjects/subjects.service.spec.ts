@@ -24,7 +24,18 @@ describe('SubjectsService', () => {
   it('rejects blank names before touching the database', async () => {
     const { service, transaction } = makeService(async () => ({ rows: [], rowCount: 0 }));
     await expect(
-      service.create('school-id', 'user-id', { name: '  ' }),
+      service.create('school-id', 'user-id', { name: '  ', weeklyFrequency: 1 }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('requires a valid weekly subject frequency', async () => {
+    const { service, transaction } = makeService(async () => ({ rows: [], rowCount: 0 }));
+    await expect(
+      service.create('school-id', 'user-id', { name: 'Matemática', weeklyFrequency: 0 }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.create('school-id', 'user-id', { name: 'Matemática', weeklyFrequency: 1.5 }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(transaction).not.toHaveBeenCalled();
   });
@@ -38,10 +49,14 @@ describe('SubjectsService', () => {
     });
 
     await expect(
-      service.create('school-id', 'user-id', { name: '  Matemática  ' }),
+      service.create('school-id', 'user-id', {
+        name: '  Matemática  ',
+        weeklyFrequency: 4,
+      }),
     ).resolves.toEqual({
       id: subjectId,
       name: 'Matemática',
+      weeklyFrequency: 4,
       scheduleCount: 0,
       assessmentCount: 0,
     });
@@ -57,14 +72,14 @@ describe('SubjectsService', () => {
     });
 
     await expect(
-      service.create('school-id', 'user-id', { name: 'Matemática' }),
+      service.create('school-id', 'user-id', { name: 'Matemática', weeklyFrequency: 1 }),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('prevents deleting subjects linked to schedules or assessments', async () => {
     const { service, query } = makeService(async (sql) => {
-      if (sql.includes('SELECT name FROM school_subjects')) {
-        return { rows: [{ name: 'Matemática' }], rowCount: 1 };
+      if (sql.includes('SELECT name, weekly_frequency FROM school_subjects')) {
+        return { rows: [{ name: 'Matemática', weekly_frequency: 4 }], rowCount: 1 };
       }
       return {
         rows: [{ schedule_count: 1, assessment_count: 0 }],

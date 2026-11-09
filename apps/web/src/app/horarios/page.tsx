@@ -3,7 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { LogoutButton } from "../logout-button";
-import type { SchoolClass } from "../turmas/class-form";
+import type { SchoolClass, SchoolClassSessions } from "../turmas/class-form";
 import { ScheduleManagement } from "./schedule-management";
 import type { ScheduleRecord, ScheduleTeacher, SchoolSubject } from "./schedule-management";
 import { SectionIllustration } from "../section-illustration";
@@ -39,28 +39,31 @@ async function SchedulesDashboard() {
     redirect("/");
   }
 
-  const [classResponse, teacherResponse, scheduleResponse, subjectResponse] = await Promise.all([
+  const [classResponse, teacherResponse, scheduleResponse, subjectResponse, sessionsResponse] = await Promise.all([
     fetch(`${apiUrl}/school-structure/classes`, { headers, cache: "no-store" }),
     fetch(`${apiUrl}/teachers`, { headers, cache: "no-store" }),
     fetch(`${apiUrl}/schedules`, { headers, cache: "no-store" }),
     fetch(`${apiUrl}/subjects`, { headers, cache: "no-store" }),
+    fetch(`${apiUrl}/settings/class-sessions`, { headers, cache: "no-store" }),
   ]);
   if (
     classResponse.status === 401 || classResponse.status === 403 ||
     teacherResponse.status === 401 || teacherResponse.status === 403 ||
     scheduleResponse.status === 401 || scheduleResponse.status === 403 ||
-    subjectResponse.status === 401 || subjectResponse.status === 403
+    subjectResponse.status === 401 || subjectResponse.status === 403 ||
+    sessionsResponse.status === 401 || sessionsResponse.status === 403
   ) {
     redirect("/login");
   }
-  if (!classResponse.ok || !teacherResponse.ok || !scheduleResponse.ok || !subjectResponse.ok) {
+  if (!classResponse.ok || !teacherResponse.ok || !scheduleResponse.ok || !subjectResponse.ok || !sessionsResponse.ok) {
     throw new Error("Não foi possível carregar as turmas, professores, matérias e horários.");
   }
-  const [classes, teachers, schedules, subjects] = await Promise.all([
+  const [classes, teachers, schedules, subjects, classSessions] = await Promise.all([
     classResponse.json() as Promise<SchoolClass[]>,
     teacherResponse.json() as Promise<ScheduleTeacher[]>,
     scheduleResponse.json() as Promise<ScheduleRecord[]>,
     subjectResponse.json() as Promise<SchoolSubject[]>,
+    sessionsResponse.json() as Promise<SchoolClassSessions>,
   ]);
 
   return (
@@ -130,22 +133,12 @@ async function SchedulesDashboard() {
           </div>
         </header>
 
-        <section className="welcome-section classes-welcome">
-          <div>
-            <p className="eyebrow">CADA DIA TEM SEU RITMO <span aria-hidden="true">✦</span></p>
-            <h1>Horários das turmas <span aria-hidden="true">🕒</span></h1>
-            <p className="welcome-copy">
-              Monte a rotina semanal de cada turma e evite sobreposições de aulas.
-            </p>
-          </div>
-          <SectionIllustration kind="schedules" />
-        </section>
-
         <ScheduleManagement
           initialSchedules={schedules}
           classes={classes}
           teachers={teachers}
           subjects={subjects}
+          classSessions={classSessions}
         />
 
         <footer className="page-footer">

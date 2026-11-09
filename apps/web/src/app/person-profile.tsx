@@ -17,6 +17,7 @@ interface StudentProfileData {
     leaveReason: string | null;
     schoolName: string;
     createdAt: string;
+    hasPhoto: boolean;
     photoAuthorizationDate: string | null;
     photoAuthorizedBy: string | null;
   };
@@ -115,6 +116,12 @@ interface TeacherProfileData {
 
 type ProfileData = StudentProfileData | TeacherProfileData;
 
+interface PersonPhotoUpdatedDetail {
+  kind: "students" | "teachers";
+  personId: string;
+  hasPhoto: boolean;
+}
+
 interface PersonProfileProps {
   kind: "students" | "teachers";
   personId: string;
@@ -160,6 +167,18 @@ function formatDateTime(value: string) {
     dateStyle: "medium",
     timeStyle: "short",
   });
+}
+
+function behaviorCategoryLabel(category: string) {
+  const labels: Record<string, string> = {
+    participation: "Participação",
+    collaboration: "Colaboração e convivência",
+    responsibility: "Responsabilidade",
+    learning: "Envolvimento na aprendizagem",
+    positive: "Destaque positivo",
+    other: "Outro fato observado",
+  };
+  return labels[category] ?? "Outro fato observado";
 }
 
 function localDateInputValue() {
@@ -234,6 +253,22 @@ export function PersonProfile({
     }
     void loadProfile();
     return () => controller.abort();
+  }, [kind, personId]);
+
+  useEffect(() => {
+    function onPhotoUpdated(event: Event) {
+      const { kind: updatedKind, personId: updatedPersonId, hasPhoto } = (
+        event as CustomEvent<PersonPhotoUpdatedDetail>
+      ).detail;
+      if (updatedKind !== kind || updatedPersonId !== personId || kind !== "students") return;
+      setProfile((current) => {
+        if (!current || !("student" in current)) return current;
+        return { ...current, student: { ...current.student, hasPhoto } };
+      });
+    }
+
+    window.addEventListener("klassapp:person-photo-updated", onPhotoUpdated);
+    return () => window.removeEventListener("klassapp:person-photo-updated", onPhotoUpdated);
   }, [kind, personId]);
 
   const isStudent = kind === "students";
@@ -516,7 +551,10 @@ export function PersonProfile({
         tabIndex={-1}
       >
         {studentProfile && !isEditing && (
-          <section className="student-ficha-sheet" aria-labelledby="person-ficha-title">
+          <section
+            className={`student-ficha-sheet${studentProfile.student.isActive ? "" : " student-ficha-inactive"}`}
+            aria-labelledby="person-ficha-title"
+          >
             <header className="student-ficha-header">
               <span className="student-ficha-mark" aria-hidden="true">✿</span>
               <div className="student-ficha-heading-copy">
@@ -534,6 +572,15 @@ export function PersonProfile({
                     personId={personId}
                     personName={studentProfile.student.fullName}
                   />
+                  {!studentProfile.student.hasPhoto && canEditProfile && (
+                    <button
+                      className="student-ficha-photo-prompt"
+                      onClick={beginEditing}
+                      type="button"
+                    >
+                      Foto pendente · Editar ficha
+                    </button>
+                  )}
                 </div>
                 <div className="student-ficha-name">
                   <p className="card-kicker">ESTUDANTE</p>
@@ -572,8 +619,28 @@ export function PersonProfile({
                   {studentProfile.student.homeAddress ??
                     (studentProfile.responsiblesRestricted
                       ? "Disponível apenas para a administração."
-                      : "Não informado.")}
+                      :                       "Não informado.")}
                 </p>
+              </section>
+
+              <section className="student-ficha-section student-ficha-behavior">
+                <h2><span aria-hidden="true">♡</span> Comportamento</h2>
+                <div className="student-ficha-behavior-content">
+                  {studentProfile.behavior.length > 0 ? (
+                    <ul>
+                      {studentProfile.behavior.map((record) => (
+                        <li className="student-ficha-behavior-record" key={record.id}>
+                          <strong>{behaviorCategoryLabel(record.category)}</strong>
+                          <span>{formatDate(record.occurredOn)} · {record.classLabel}</span>
+                          <p>{record.description}</p>
+                          <small>Registrado por {record.recordedBy}</small>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p>Nenhum registro de comportamento.</p>
+                  )}
+                </div>
               </section>
 
               {!studentProfile.student.isActive && (

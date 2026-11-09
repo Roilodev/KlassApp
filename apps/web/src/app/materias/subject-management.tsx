@@ -18,6 +18,7 @@ export function SubjectManagement({
 }: SubjectManagementProps) {
   const [subjects, setSubjects] = useState(initialSubjects);
   const [name, setName] = useState("");
+  const [weeklyFrequency, setWeeklyFrequency] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -28,6 +29,7 @@ export function SubjectManagement({
   function openNewSubject() {
     setEditingId(null);
     setName("");
+    setWeeklyFrequency("");
     setError("");
     setMessage("");
     setIsFormOpen(true);
@@ -36,6 +38,7 @@ export function SubjectManagement({
   function editSubject(subject: SchoolSubject) {
     setEditingId(subject.id);
     setName(subject.name);
+    setWeeklyFrequency(String(subject.weeklyFrequency ?? ""));
     setError("");
     setMessage("");
     setIsFormOpen(true);
@@ -53,7 +56,7 @@ export function SubjectManagement({
           method: editingId ? "PATCH" : "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name }),
+          body: JSON.stringify({ name, weeklyFrequency: Number(weeklyFrequency) }),
         },
       );
       if (!response.ok) {
@@ -123,6 +126,18 @@ export function SubjectManagement({
                 value={name}
               />
             </label>
+            <label>
+              Frequência semanal por turma
+              <input
+                max="40"
+                min="1"
+                onChange={(event) => setWeeklyFrequency(event.target.value)}
+                required
+                type="number"
+                value={weeklyFrequency}
+              />
+              <small>Quantidade de aulas desta matéria por semana em cada turma.</small>
+            </label>
             <div className="dialog-form-actions">
               <button className="class-submit" disabled={submitting} type="submit">
                 {submitting ? "Salvando..." : editingId ? "Salvar alterações" : "Cadastrar matéria"}
@@ -171,6 +186,13 @@ export function SubjectManagement({
                 <div className="subject-list-copy">
                   <strong>{subject.name}</strong>
                   <div className="subject-card-stats">
+                    <span>
+                      <strong>
+                        {subject.weeklyFrequency === null
+                          ? "Definir frequência"
+                          : `${subject.weeklyFrequency} aulas/semana por turma`}
+                      </strong>
+                    </span>
                     <span><strong>{subject.scheduleCount}</strong> horários</span>
                     <span><strong>{subject.assessmentCount}</strong> avaliações</span>
                   </div>

@@ -66,6 +66,31 @@ export class TeachersController {
     );
   }
 
+  @Post('teachers/:id/classes')
+  @UseGuards(RolesGuard)
+  @SchoolRoles('admin')
+  assignClass(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') teacherId: string,
+    @Body() body: unknown,
+  ) {
+    if (
+      !body ||
+      typeof body !== 'object' ||
+      Array.isArray(body) ||
+      !('classId' in body) ||
+      typeof body.classId !== 'string'
+    ) {
+      throw new BadRequestException('Selecione uma turma válida.');
+    }
+    return this.teachers.assignClass(
+      request.user.schoolId,
+      request.user.id,
+      teacherId,
+      body.classId,
+    );
+  }
+
   @Post('teachers/invitations/:id/activate')
   @UseGuards(RolesGuard)
   @SchoolRoles('admin')

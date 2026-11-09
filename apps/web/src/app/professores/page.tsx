@@ -96,10 +96,6 @@ async function TeachersDashboard() {
             <span className="nav-icon" aria-hidden="true">♧</span>
             <span>Alunos</span>
           </Link>
-          <Link className="nav-item" href="/horarios">
-            <span className="nav-icon" aria-hidden="true">◷</span>
-            <span>Horários</span>
-          </Link>
           <Link className="nav-item" href="/materias">
             <span className="nav-icon" aria-hidden="true">▤</span>
             <span>Matérias</span>
@@ -137,15 +133,6 @@ async function TeachersDashboard() {
             <LogoutButton />
           </div>
         </header>
-
-        <section className="welcome-section classes-welcome">
-          <div>
-            <p className="eyebrow">JUNTOS, A ESCOLA ACONTECE <span aria-hidden="true">✦</span></p>
-            <h1>Equipe de professores <span aria-hidden="true">🌱</span></h1>
-            <p className="welcome-copy">Convide os professores e organize o acesso de cada pessoa às suas turmas.</p>
-          </div>
-          <SectionIllustration kind="teachers" />
-        </section>
 
         <TeacherManagement initialTeachers={teachers} classes={classes} subjects={subjects} />
 

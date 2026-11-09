@@ -658,6 +658,8 @@ export function EventManagement({ initialEvents, classes, schoolName }: EventMan
                     <div className="event-presentation-copy">
                       <span className="event-presentation-weekday">{date.weekday} · {date.time}</span>
                       <h3>{schoolEvent.title}</h3>
+                    </div>
+                    <div className="event-presentation-details">
                       <span className="event-presentation-audience">{schoolEvent.audienceLabel}</span>
                       {schoolEvent.location && (
                         <span className="event-presentation-location">

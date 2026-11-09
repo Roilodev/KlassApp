@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import Link from "next/link";
 import { EntryFormDialog } from "../entry-form-dialog";
-import type { SchoolClass } from "../turmas/class-form";
+import type { SchoolClass, SchoolClassSessions } from "../turmas/class-form";
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const weekdays = [
@@ -32,6 +32,7 @@ export interface ScheduleRecord {
 export interface SchoolSubject {
   id: string;
   name: string;
+  weeklyFrequency: number | null;
   scheduleCount: number;
   assessmentCount: number;
 }
@@ -49,6 +50,7 @@ interface ScheduleManagementProps {
   classes: SchoolClass[];
   teachers: ScheduleTeacher[];
   subjects: SchoolSubject[];
+  classSessions: SchoolClassSessions;
 }
 
 function sortSchedules(schedules: ScheduleRecord[]) {
@@ -65,12 +67,17 @@ export function ScheduleManagement({
   classes,
   teachers,
   subjects,
+  classSessions,
 }: ScheduleManagementProps) {
+  const firstClass = classes[0];
+  const firstPeriod = firstClass
+    ? classSessions[firstClass.session ?? "morning"][0]
+    : undefined;
   const [schedules, setSchedules] = useState(() => sortSchedules(initialSchedules));
-  const [classId, setClassId] = useState(classes[0]?.id ?? "");
+  const [classId, setClassId] = useState(firstClass?.id ?? "");
   const [dayOfWeek, setDayOfWeek] = useState("1");
-  const [startsAt, setStartsAt] = useState("08:00");
-  const [endsAt, setEndsAt] = useState("08:50");
+  const [startsAt, setStartsAt] = useState(firstPeriod?.startsAt ?? "");
+  const [endsAt, setEndsAt] = useState(firstPeriod?.endsAt ?? "");
   const [subjectId, setSubjectId] = useState(subjects[0]?.id ?? "");
   const [teacherId, setTeacherId] = useState("");
   const [error, setError] = useState("");
@@ -80,12 +87,16 @@ export function ScheduleManagement({
   const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
 
-  const eligibleTeachers = teachers.filter(
-    (teacher) =>
-      teacher.status === "active" &&
-      teacher.classes.some((assignedClass) => assignedClass.id === classId) &&
-      teacher.subjectIds.includes(subjectId),
-  );
+  const eligibleTeachers = teachers.filter((teacher) => teacher.status === "active");
+  const teacherConflicts = teacherId
+    ? schedules.filter((schedule) =>
+        schedule.teacherId === teacherId &&
+        schedule.id !== editingScheduleId &&
+        schedule.dayOfWeek === Number(dayOfWeek) &&
+        schedule.startsAt.slice(0, 5) < endsAt &&
+        schedule.endsAt.slice(0, 5) > startsAt
+      )
+    : [];
   const pendingTeachersForClass = teachers.filter(
     (teacher) =>
       teacher.status === "pending" &&
@@ -94,14 +105,19 @@ export function ScheduleManagement({
   );
   const editingSchedule = schedules.find((schedule) => schedule.id === editingScheduleId);
   const weekdaySchedules = schedules.filter((schedule) => schedule.dayOfWeek <= weekdays.length);
+  const selectedClass = classes.find((schoolClass) => schoolClass.id === classId);
+  const sessionPeriods = selectedClass
+    ? classSessions[selectedClass.session ?? "morning"]
+    : [];
+  const selectedPeriodValue = startsAt && endsAt ? `${startsAt}|${endsAt}` : "";
 
   function resetForm() {
     setEditingScheduleId(null);
     setIsFormOpen(false);
-    setClassId(classes[0]?.id ?? "");
+    setClassId(firstClass?.id ?? "");
     setDayOfWeek("1");
-    setStartsAt("08:00");
-    setEndsAt("08:50");
+    setStartsAt(firstPeriod?.startsAt ?? "");
+    setEndsAt(firstPeriod?.endsAt ?? "");
     setSubjectId(subjects[0]?.id ?? "");
     setTeacherId("");
   }
@@ -122,6 +138,12 @@ export function ScheduleManagement({
   function startNewSchedule(selectedClassId = classes[0]?.id ?? "") {
     resetForm();
     setClassId(selectedClassId);
+    const selected = classes.find((schoolClass) => schoolClass.id === selectedClassId);
+    const period = selected
+      ? classSessions[selected.session ?? "morning"][0]
+      : undefined;
+    setStartsAt(period?.startsAt ?? "");
+    setEndsAt(period?.endsAt ?? "");
     setError("");
     setMessage("");
     setIsFormOpen(true);
@@ -229,7 +251,14 @@ export function ScheduleManagement({
               Turma
               <select
                 onChange={(event) => {
-                  setClassId(event.target.value);
+                  const nextClassId = event.target.value;
+                  const nextClass = classes.find((schoolClass) => schoolClass.id === nextClassId);
+                  const nextPeriod = nextClass
+                    ? classSessions[nextClass.session ?? "morning"][0]
+                    : undefined;
+                  setClassId(nextClassId);
+                  setStartsAt(nextPeriod?.startsAt ?? "");
+                  setEndsAt(nextPeriod?.endsAt ?? "");
                   setTeacherId("");
                 }}
                 required
@@ -237,7 +266,7 @@ export function ScheduleManagement({
               >
                 {classes.map((schoolClass) => (
                   <option key={schoolClass.id} value={schoolClass.id}>
-                    {schoolClass.grade} · Turma {schoolClass.name} · {schoolClass.year}
+                    {schoolClass.grade} · Turma {schoolClass.name} · {schoolClass.year} · {schoolClass.session === "afternoon" ? "Tarde" : "Manhã"}
                   </option>
                 ))}
               </select>
@@ -269,12 +298,13 @@ export function ScheduleManagement({
               </select>
             </label>
             <label>
-              Professor (opcional)
+              Professor
               <select
                 onChange={(event) => setTeacherId(event.target.value)}
+                required
                 value={teacherId}
               >
-                <option value="">Sem professor atribuído</option>
+                <option disabled value="">Selecione um professor</option>
                 {eligibleTeachers.map((teacher) => (
                   <option key={teacher.id} value={teacher.id}>{teacher.displayName}</option>
                 ))}
@@ -289,33 +319,68 @@ export function ScheduleManagement({
             {eligibleTeachers.length === 0 && (
               <div className="schedule-teacher-notice" role="status">
                 <span>
-                  Nenhum professor ativo atribuído a esta turma e matéria.
+                  Nenhum professor ativo disponível para atribuição.
                   {pendingTeachersForClass.length > 0 &&
-                    ` ${pendingTeachersForClass.length} convite(s) pendente(s) aparecerá(ão) após a ativação.`}
+                    ` ${pendingTeachersForClass.length} convite(s) pendente(s) ficará(ão) disponível(is) após a ativação.`}
                 </span>
                 <Link href="/professores">Ver professores</Link>
               </div>
             )}
+            {teacherConflicts.length > 0 && (
+              <div className="schedule-teacher-conflict" role="alert">
+                <strong>Este professor já está ocupado neste horário:</strong>
+                <ul>
+                  {teacherConflicts.map((schedule) => (
+                    <li key={schedule.id}>
+                      {weekdays[schedule.dayOfWeek - 1]} · {schedule.startsAt.slice(0, 5)}–
+                      {schedule.endsAt.slice(0, 5)} · {schedule.classLabel} · {schedule.subject}
+                    </li>
+                  ))}
+                </ul>
+                <span>Selecione outro professor ou turno.</span>
+              </div>
+            )}
             <label>
-              Início
-              <input
-                onChange={(event) => setStartsAt(event.target.value)}
+              Turno de aula
+              <select
+                onChange={(event) => {
+                  const [nextStartsAt, nextEndsAt] = event.target.value.split("|");
+                  setStartsAt(nextStartsAt ?? "");
+                  setEndsAt(nextEndsAt ?? "");
+                }}
                 required
-                type="time"
-                value={startsAt}
-              />
+                value={selectedPeriodValue}
+              >
+                <option disabled value="">Selecione um turno</option>
+                {sessionPeriods.map((period, index) => (
+                  <option
+                    key={`${period.startsAt}-${period.endsAt}`}
+                    value={`${period.startsAt}|${period.endsAt}`}
+                  >
+                    Turno {index + 1} · {period.startsAt}–{period.endsAt}
+                  </option>
+                ))}
+                {selectedPeriodValue &&
+                  !sessionPeriods.some(
+                    (period) => `${period.startsAt}|${period.endsAt}` === selectedPeriodValue,
+                  ) && (
+                    <option value={selectedPeriodValue}>
+                      Horário atual fora dos turnos configurados · {startsAt}–{endsAt}
+                    </option>
+                  )}
+              </select>
             </label>
-            <label>
-              Fim
-              <input
-                onChange={(event) => setEndsAt(event.target.value)}
-                required
-                type="time"
-                value={endsAt}
-              />
-            </label>
+            {sessionPeriods.length === 0 && (
+              <p className="schedule-teacher-notice" role="status">
+                Nenhum turno está configurado para esta sessão. <Link href="/configuracao">Configurar turnos</Link>
+              </p>
+            )}
             <div className="schedule-form-actions">
-              <button className="class-submit schedule-submit" disabled={submitting} type="submit">
+              <button
+                className="class-submit schedule-submit"
+                disabled={submitting || sessionPeriods.length === 0 || teacherConflicts.length > 0}
+                type="submit"
+              >
                 {submitting ? "Salvando..." : editingScheduleId ? "Salvar alterações" : "Adicionar ao horário"}
               </button>
               {editingScheduleId && (
@@ -391,7 +456,12 @@ export function ScheduleManagement({
                         <span className="schedule-slot-icon" aria-hidden="true">✿</span>
                         <span className="schedule-slot-copy">
                           <strong>{schedule.subject}</strong>
-                          <small>{schedule.classLabel} · {schedule.year}</small>
+                          <small>
+                            {schedule.classLabel} · {schedule.year} ·{" "}
+                            {classes.find((schoolClass) => schoolClass.id === schedule.classId)?.session === "afternoon"
+                              ? "Tarde"
+                              : "Manhã"}
+                          </small>
                           <small>{schedule.teacherName ?? "Professor não definido"}</small>
                         </span>
                         <span className="schedule-actions">

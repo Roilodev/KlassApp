@@ -67,9 +67,6 @@ async function SubjectsDashboard() {
               <Link className="nav-item" href="/alunos">
                 <span className="nav-icon" aria-hidden="true">♧</span><span>Alunos</span>
               </Link>
-              <Link className="nav-item" href="/horarios">
-                <span className="nav-icon" aria-hidden="true">◷</span><span>Horários</span>
-              </Link>
             </>
           )}
           <Link className="nav-item active" href="/materias">

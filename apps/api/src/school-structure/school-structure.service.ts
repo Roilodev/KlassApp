@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import type { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -13,7 +14,42 @@ export interface SchoolClass {
   year: number;
   grade: string;
   name: string;
+  session?: 'morning' | 'afternoon';
   students?: Array<{ id: string; fullName: string }>;
+}
+
+export interface SessionScheduleChange {
+  id: string;
+  startsAt: string;
+  endsAt: string;
+  teacherId: string | null;
+}
+
+export interface SessionTeacherConflict {
+  scheduleId: string;
+  subject: string;
+  startsAt: string;
+  endsAt: string;
+  teacherName: string;
+  conflictingClass: string;
+  conflictingSubject: string;
+  dayOfWeek: number;
+}
+
+interface ClassSessionPeriodRow {
+  session: 'morning' | 'afternoon';
+  starts_at: string;
+  ends_at: string;
+  period_order: number;
+}
+
+interface ClassScheduleToMove {
+  id: string;
+  day_of_week: number;
+  starts_at: string;
+  ends_at: string;
+  teacher_id: string | null;
+  subject: string;
 }
 
 export interface SchoolClassRoster {
@@ -26,6 +62,9 @@ export interface CreateSchoolClassInput {
   year: number;
   grade: string;
   name: string;
+  session?: 'morning' | 'afternoon';
+  allowTeacherConflictsWithoutTeacher?: boolean;
+  confirmedTeacherConflictScheduleIds?: string[];
 }
 
 function validateClassInput(input: CreateSchoolClassInput) {
@@ -41,9 +80,13 @@ function validateClassInput(input: CreateSchoolClassInput) {
   }
   const grade = input.grade.trim();
   const name = input.name.trim();
+  const session = input.session;
 
   if (!Number.isInteger(input.year) || input.year < 2000 || input.year > 2200) {
     throw new BadRequestException('Informe um ano letivo válido.');
+  }
+  if (session !== undefined && session !== 'morning' && session !== 'afternoon') {
+    throw new BadRequestException('Informe uma sessão válida para a turma.');
   }
   if (grade.length < 1 || grade.length > 80) {
     throw new BadRequestException('O ano escolar deve ter entre 1 e 80 caracteres.');
@@ -51,7 +94,7 @@ function validateClassInput(input: CreateSchoolClassInput) {
   if (name.length < 1 || name.length > 40) {
     throw new BadRequestException('A turma deve ter entre 1 e 40 caracteres.');
   }
-  return { year: input.year, grade, name };
+  return { year: input.year, grade, name, session };
 }
 
 @Injectable()
@@ -64,8 +107,9 @@ export class SchoolStructureService {
       year: number;
       grade: string;
       name: string;
+      session: 'morning' | 'afternoon';
     }>(
-      `SELECT classes.id, academic_years.year, grades.name AS grade, classes.name
+      `SELECT classes.id, academic_years.year, grades.name AS grade, classes.name, classes.session
        FROM classes
        JOIN academic_years
          ON academic_years.id = classes.academic_year_id
@@ -127,12 +171,14 @@ export class SchoolStructureService {
     input: CreateSchoolClassInput,
   ): Promise<SchoolClass> {
     const { year, grade, name } = validateClassInput(input);
+    const session = input.session ?? 'morning';
 
     const result = await this.database.query<{
       id: string;
       year: number;
       grade: string;
       name: string;
+      session: 'morning' | 'afternoon';
     }>(
       `WITH school_year AS (
          INSERT INTO academic_years (school_id, year)
@@ -149,18 +195,19 @@ export class SchoolStructureService {
          RETURNING id, name
        ),
        school_class AS (
-         INSERT INTO classes (school_id, academic_year_id, grade_id, name)
-         SELECT $1, school_year.id, school_grade.id, $4
+         INSERT INTO classes (school_id, academic_year_id, grade_id, name, session)
+         SELECT $1, school_year.id, school_grade.id, $4, $5
          FROM school_year CROSS JOIN school_grade
          ON CONFLICT (school_id, academic_year_id, grade_id, name)
          DO UPDATE SET name = EXCLUDED.name
-         RETURNING id, academic_year_id, grade_id, name
+         RETURNING id, academic_year_id, grade_id, name, session
        )
-       SELECT school_class.id, school_year.year, school_grade.name AS grade, school_class.name
+       SELECT school_class.id, school_year.year, school_grade.name AS grade,
+              school_class.name, school_class.session
        FROM school_class
        JOIN school_year ON school_year.id = school_class.academic_year_id
        JOIN school_grade ON school_grade.id = school_class.grade_id`,
-      [schoolId, year, grade, name],
+      [schoolId, year, grade, name, session],
     );
 
     const created = result.rows[0];
@@ -175,16 +222,31 @@ export class SchoolStructureService {
     actorId: string,
     classId: string,
     input: CreateSchoolClassInput,
-  ): Promise<SchoolClass> {
+  ): Promise<SchoolClass & { rescheduledSchedules: SessionScheduleChange[] }> {
     if (!UUID_PATTERN.test(classId)) {
       throw new BadRequestException('Informe uma turma válida.');
     }
-    const { year, grade, name } = validateClassInput(input);
+    const allowTeacherConflictsWithoutTeacher =
+      input.allowTeacherConflictsWithoutTeacher ?? false;
+    if (typeof allowTeacherConflictsWithoutTeacher !== 'boolean') {
+      throw new BadRequestException('Informe uma opção válida para conflitos de professores.');
+    }
+    const confirmedTeacherConflictScheduleIds =
+      input.confirmedTeacherConflictScheduleIds ?? [];
+    if (
+      !Array.isArray(confirmedTeacherConflictScheduleIds) ||
+      confirmedTeacherConflictScheduleIds.some((id) => typeof id !== 'string' || !UUID_PATTERN.test(id))
+    ) {
+      throw new BadRequestException('Informe as aulas com conflitos de professores válidas.');
+    }
+    const { year, grade, name, session: requestedSession } = validateClassInput(input);
 
     try {
       return await this.database.transaction(async (client) => {
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1), 0)', [schoolId]);
         const existing = await client.query<SchoolClass>(
-          `SELECT classes.id, academic_years.year, grades.name AS grade, classes.name
+          `SELECT classes.id, academic_years.year, grades.name AS grade,
+                  classes.name, classes.session
            FROM classes
            JOIN academic_years
              ON academic_years.id = classes.academic_year_id
@@ -200,6 +262,18 @@ export class SchoolStructureService {
         if (!previous) {
           throw new NotFoundException('Turma não encontrada.');
         }
+        const session = requestedSession ?? previous.session ?? 'morning';
+        const rescheduledSchedules = session !== (previous.session ?? 'morning')
+          ? await this.rescheduleClassSchedules(
+            client,
+            schoolId,
+            classId,
+            previous.session ?? 'morning',
+            session,
+            allowTeacherConflictsWithoutTeacher,
+            confirmedTeacherConflictScheduleIds,
+          )
+          : [];
 
         const schoolYear = await client.query<{ id: string }>(
           `INSERT INTO academic_years (school_id, year)
@@ -244,10 +318,10 @@ export class SchoolStructureService {
 
         const updated = await client.query<SchoolClass>(
           `UPDATE classes
-           SET academic_year_id = $3, grade_id = $4, name = $5
+           SET academic_year_id = $3, grade_id = $4, name = $5, session = $8
            WHERE school_id = $1 AND id = $2
-           RETURNING id, $6::integer AS year, $7::text AS grade, name`,
-          [schoolId, classId, targetYearId, targetGradeId, name, year, grade],
+           RETURNING id, $6::integer AS year, $7::text AS grade, name, session`,
+          [schoolId, classId, targetYearId, targetGradeId, name, year, grade, session],
         );
         const result = updated.rows[0];
         if (!result) {
@@ -261,10 +335,10 @@ export class SchoolStructureService {
             schoolId,
             actorId,
             classId,
-            JSON.stringify({ previous, updated: result }),
+            JSON.stringify({ previous, updated: result, rescheduledSchedules }),
           ],
         );
-        return result;
+        return { ...result, rescheduledSchedules };
       });
     } catch (error) {
       if (
@@ -292,5 +366,176 @@ export class SchoolStructureService {
       }
       throw error;
     }
+  }
+
+  private async rescheduleClassSchedules(
+    client: PoolClient,
+    schoolId: string,
+    classId: string,
+    sourceSession: 'morning' | 'afternoon',
+    targetSession: 'morning' | 'afternoon',
+    allowTeacherConflictsWithoutTeacher: boolean,
+    confirmedTeacherConflictScheduleIds: string[],
+  ): Promise<SessionScheduleChange[]> {
+    const periods = await client.query<ClassSessionPeriodRow>(
+      `SELECT session, starts_at::text AS starts_at, ends_at::text AS ends_at, period_order
+       FROM school_class_session_periods
+       WHERE school_id = $1 AND session IN ($2, $3)
+       ORDER BY session, period_order`,
+      [schoolId, sourceSession, targetSession],
+    );
+    const sourcePeriods = periods.rows.filter((period) => period.session === sourceSession);
+    const targetPeriods = periods.rows.filter((period) => period.session === targetSession);
+    const schedules = await client.query<ClassScheduleToMove>(
+      `SELECT class_schedules.id, class_schedules.day_of_week,
+              class_schedules.starts_at::text AS starts_at,
+              class_schedules.ends_at::text AS ends_at,
+              class_schedules.teacher_id, school_subjects.name AS subject
+       FROM class_schedules
+       JOIN school_subjects
+         ON school_subjects.school_id = class_schedules.school_id
+        AND school_subjects.id = class_schedules.subject_id
+       WHERE class_schedules.school_id = $1 AND class_schedules.class_id = $2
+       ORDER BY class_schedules.day_of_week, class_schedules.starts_at
+       FOR UPDATE`,
+      [schoolId, classId],
+    );
+    if (schedules.rowCount === 0) {
+      return [];
+    }
+
+    const moves = schedules.rows.map((schedule) => {
+      const sourceIndex = sourcePeriods.findIndex(
+        (period) =>
+          period.starts_at.slice(0, 5) === schedule.starts_at.slice(0, 5) &&
+          period.ends_at.slice(0, 5) === schedule.ends_at.slice(0, 5),
+      );
+      const target = sourceIndex >= 0 ? targetPeriods[sourceIndex] : undefined;
+      if (!target) {
+        throw new ConflictException(
+          'Não é possível trocar a sessão: configure turnos correspondentes para todas as aulas da turma.',
+        );
+      }
+      return {
+        ...schedule,
+        targetStartsAt: target.starts_at.slice(0, 5),
+        targetEndsAt: target.ends_at.slice(0, 5),
+      };
+    });
+
+    const recess = await client.query<{
+      starts_at: string | null;
+      ends_at: string | null;
+    }>(
+      `SELECT ${targetSession === 'morning' ? 'starts_at' : 'afternoon_starts_at'}::text AS starts_at,
+              ${targetSession === 'morning' ? 'ends_at' : 'afternoon_ends_at'}::text AS ends_at
+       FROM school_recesses
+       WHERE school_id = $1`,
+      [schoolId],
+    );
+    const recessStart = recess.rows[0]?.starts_at?.slice(0, 5);
+    const recessEnd = recess.rows[0]?.ends_at?.slice(0, 5);
+    const teacherConflicts: SessionTeacherConflict[] = [];
+    for (const move of moves) {
+      if (
+        move.day_of_week <= 5 && recessStart && recessEnd &&
+        recessStart < move.targetEndsAt &&
+        recessEnd > move.targetStartsAt
+      ) {
+        throw new ConflictException(
+          'Não é possível trocar a sessão: uma ou mais aulas coincidem com o recreio configurado.',
+        );
+      }
+      if (!move.teacher_id) {
+        continue;
+      }
+      const conflict = await client.query<{
+        teacher_name: string;
+        class_label: string;
+        subject: string;
+      }>(
+        `SELECT users.display_name AS teacher_name,
+                grades.name || ' · Turma ' || classes.name AS class_label,
+                school_subjects.name AS subject
+         FROM class_schedules
+         JOIN classes
+           ON classes.school_id = class_schedules.school_id
+          AND classes.id = class_schedules.class_id
+         JOIN grades
+           ON grades.school_id = classes.school_id
+          AND grades.id = classes.grade_id
+         JOIN school_subjects
+           ON school_subjects.school_id = class_schedules.school_id
+          AND school_subjects.id = class_schedules.subject_id
+         JOIN users ON users.id = class_schedules.teacher_id
+         WHERE class_schedules.school_id = $1
+           AND class_schedules.class_id <> $2
+           AND class_schedules.teacher_id = $3
+           AND class_schedules.day_of_week = $4
+           AND class_schedules.starts_at < $6::time
+           AND class_schedules.ends_at > $5::time`,
+        [
+          schoolId,
+          classId,
+          move.teacher_id,
+          move.day_of_week,
+          move.targetStartsAt,
+          move.targetEndsAt,
+        ],
+      );
+      for (const existing of conflict.rows) {
+        teacherConflicts.push({
+          scheduleId: move.id,
+          subject: move.subject,
+          startsAt: move.targetStartsAt,
+          endsAt: move.targetEndsAt,
+          teacherName: existing.teacher_name,
+          conflictingClass: existing.class_label,
+          conflictingSubject: existing.subject,
+          dayOfWeek: move.day_of_week,
+        });
+      }
+    }
+
+    const confirmedScheduleIds = new Set(confirmedTeacherConflictScheduleIds);
+    const unconfirmedTeacherConflicts = allowTeacherConflictsWithoutTeacher
+      ? teacherConflicts.filter((conflict) => !confirmedScheduleIds.has(conflict.scheduleId))
+      : teacherConflicts;
+    if (unconfirmedTeacherConflicts.length > 0) {
+      throw new ConflictException({
+        code: 'SESSION_TEACHER_CONFLICT',
+        message: 'Um ou mais professores já têm aula no novo horário.',
+        conflicts: unconfirmedTeacherConflicts,
+      });
+    }
+
+    const schedulesWithoutTeacher = new Set(
+      teacherConflicts
+        .filter((conflict) => confirmedScheduleIds.has(conflict.scheduleId))
+        .map((conflict) => conflict.scheduleId),
+    );
+    const changes: SessionScheduleChange[] = [];
+    for (const move of moves) {
+      await client.query(
+        `UPDATE class_schedules
+         SET starts_at = $3::time, ends_at = $4::time,
+             teacher_id = CASE WHEN $5::boolean THEN NULL ELSE teacher_id END
+         WHERE school_id = $1 AND id = $2`,
+        [
+          schoolId,
+          move.id,
+          move.targetStartsAt,
+          move.targetEndsAt,
+          schedulesWithoutTeacher.has(move.id),
+        ],
+      );
+      changes.push({
+        id: move.id,
+        startsAt: move.targetStartsAt,
+        endsAt: move.targetEndsAt,
+        teacherId: schedulesWithoutTeacher.has(move.id) ? null : move.teacher_id,
+      });
+    }
+    return changes;
   }
 }

@@ -106,10 +106,6 @@ async function StudentsDashboard() {
             <span className="nav-icon" aria-hidden="true">♧</span>
             <span>Alunos</span>
           </Link>
-          <Link className="nav-item" href="/horarios">
-            <span className="nav-icon" aria-hidden="true">◷</span>
-            <span>Horários</span>
-          </Link>
           <Link className="nav-item" href="/materias">
             <span className="nav-icon" aria-hidden="true">▤</span>
             <span>Matérias</span>
@@ -147,18 +143,6 @@ async function StudentsDashboard() {
             <LogoutButton />
           </div>
         </header>
-
-        <section className="welcome-section classes-welcome">
-          <div>
-            <p className="eyebrow">CADA HISTÓRIA COMEÇA AQUI <span aria-hidden="true">✦</span></p>
-            <h1>Alunos e famílias <span aria-hidden="true">🌼</span></h1>
-            <p className="welcome-copy">
-              Cadastre o aluno, organize sua matrícula e mantenha os contatos
-              autorizados da família.
-            </p>
-          </div>
-          <SectionIllustration kind="students" />
-        </section>
 
         <StudentManagement initialStudents={students} classes={classes} />
 

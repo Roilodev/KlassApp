@@ -66,6 +66,98 @@ describe('TeachersService', () => {
     );
   });
 
+  it('assigns an active teacher to a class and audits the assignment', async () => {
+    const teacherId = 'c0a80123-e89b-42d3-a456-426614174003';
+    const queryHandler = async (sql: string) => {
+      if (sql.includes('FROM school_memberships')) {
+        return { rows: [{ '?column?': 1 }], rowCount: 1 };
+      }
+      if (sql.includes('FROM classes')) {
+        return { rows: [{ '?column?': 1 }], rowCount: 1 };
+      }
+      if (sql.includes('INSERT INTO teacher_class_assignments')) {
+        return { rows: [{ class_id: classId }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 1 };
+    };
+    const { service, query, transaction } = makeService(queryHandler);
+
+    await expect(
+      service.assignClass('school-id', 'admin-id', teacherId, classId),
+    ).resolves.toEqual({ classId, assigned: true, status: 'active' });
+    expect(transaction).toHaveBeenCalledOnce();
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("'teacher.class_assigned'"),
+      ['school-id', 'admin-id', teacherId, JSON.stringify({ classId })],
+    );
+  });
+
+  it('rejects invalid teacher or class identifiers before opening a transaction', async () => {
+    const { service, transaction } = makeService();
+
+    await expect(
+      service.assignClass('school-id', 'admin-id', 'invalid-id', classId),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.assignClass('school-id', 'admin-id', 'c0a80123-e89b-42d3-a456-426614174003', 'invalid-id'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('does not assign a teacher who is not active in the school', async () => {
+    const { service, query } = makeService(async (sql) => {
+      if (sql.includes('FROM school_memberships')) {
+        return { rows: [], rowCount: 0 };
+      }
+      return { rows: [], rowCount: 1 };
+    });
+
+    await expect(
+      service.assignClass(
+        'school-id',
+        'admin-id',
+        'c0a80123-e89b-42d3-a456-426614174003',
+        classId,
+      ),
+    ).rejects.toThrow('Professor ativo ou convite pendente não encontrado.');
+    expect(query).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO teacher_class_assignments'),
+      expect.anything(),
+    );
+  });
+
+  it('adds a class to a pending invitation so it is available after activation', async () => {
+    const teacherId = 'c0a80123-e89b-42d3-a456-426614174003';
+    const queryHandler = async (sql: string) => {
+      if (sql.includes('FROM school_memberships')) {
+        return { rows: [], rowCount: 0 };
+      }
+      if (sql.includes('FROM classes')) {
+        return { rows: [{ '?column?': 1 }], rowCount: 1 };
+      }
+      if (sql.includes('FROM teacher_invitations')) {
+        return { rows: [{ class_ids: [] }], rowCount: 1 };
+      }
+      if (sql.includes('UPDATE teacher_invitations')) {
+        return { rows: [], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 1 };
+    };
+    const { service, query } = makeService(queryHandler);
+
+    await expect(
+      service.assignClass('school-id', 'admin-id', teacherId, classId),
+    ).resolves.toEqual({ classId, assigned: true, status: 'pending' });
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('array_append(class_ids, $3::uuid)'),
+      ['school-id', teacherId, classId],
+    );
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("'teacher.class_assigned'"),
+      ['school-id', 'admin-id', teacherId, JSON.stringify({ classId, status: 'pending' })],
+    );
+  });
+
   it('lets an administrator activate a pending invitation with a password', async () => {
     const invitationId = 'c0a80123-e89b-42d3-a456-426614174002';
     const teacherId = 'c0a80123-e89b-42d3-a456-426614174003';

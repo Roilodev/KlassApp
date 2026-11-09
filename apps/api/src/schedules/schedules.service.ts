@@ -178,25 +178,21 @@ export class SchedulesService {
       }
 
       if (teacherId) {
-        const assignment = await client.query(
+        const activeTeacher = await client.query(
           `SELECT 1
-           FROM teacher_class_assignments
-           JOIN teacher_subject_assignments
-             ON teacher_subject_assignments.school_id = teacher_class_assignments.school_id
-            AND teacher_subject_assignments.user_id = teacher_class_assignments.user_id
-           WHERE teacher_class_assignments.school_id = $1
-             AND teacher_class_assignments.class_id = $2
-             AND teacher_class_assignments.user_id = $3
-             AND teacher_subject_assignments.subject_id = $4`,
-          [schoolId, classId, teacherId, subjectId],
+           FROM school_memberships
+           WHERE school_id = $1 AND user_id = $2
+             AND role = 'teacher' AND is_active = true`,
+          [schoolId, teacherId],
         );
-        if (assignment.rowCount !== 1) {
+        if (activeTeacher.rowCount !== 1) {
           throw new BadRequestException(
-            'O professor precisa estar atribuído à turma e à matéria selecionadas.',
+            'Selecione um professor ativo desta escola.',
           );
         }
       }
 
+      await this.assertConfiguredSessionPeriod(client, schoolId, classId, startsAt, endsAt);
       await this.assertOutsideSchoolRecess(client, schoolId, dayOfWeek, startsAt, endsAt);
       const overlapping = await client.query<{
         class_conflict: boolean;
@@ -306,25 +302,23 @@ export class SchedulesService {
       }
 
       if (teacherId) {
-        const assignment = await client.query(
-          `SELECT 1
-           FROM teacher_class_assignments
-           JOIN teacher_subject_assignments
-             ON teacher_subject_assignments.school_id = teacher_class_assignments.school_id
-            AND teacher_subject_assignments.user_id = teacher_class_assignments.user_id
-           WHERE teacher_class_assignments.school_id = $1
-             AND teacher_class_assignments.class_id = $2
-             AND teacher_class_assignments.user_id = $3
-             AND teacher_subject_assignments.subject_id = $4`,
-          [schoolId, classId, teacherId, subjectId],
-        );
-        if (assignment.rowCount !== 1 && previous.teacher_id !== teacherId) {
+        const activeTeacher = previous.teacher_id === teacherId
+          ? { rowCount: 1 }
+          : await client.query(
+              `SELECT 1
+               FROM school_memberships
+               WHERE school_id = $1 AND user_id = $2
+                 AND role = 'teacher' AND is_active = true`,
+              [schoolId, teacherId],
+            );
+        if (activeTeacher.rowCount !== 1) {
           throw new BadRequestException(
-            'O professor precisa estar atribuído à turma e à matéria selecionadas.',
+            'Selecione um professor ativo desta escola.',
           );
         }
       }
 
+      await this.assertConfiguredSessionPeriod(client, schoolId, classId, startsAt, endsAt);
       await this.assertOutsideSchoolRecess(client, schoolId, dayOfWeek, startsAt, endsAt);
       const overlapping = await client.query<{
         class_conflict: boolean;
@@ -434,6 +428,31 @@ export class SchedulesService {
     return client.query('SELECT pg_advisory_xact_lock(hashtext($1), 0)', [schoolId]);
   }
 
+  private async assertConfiguredSessionPeriod(
+    client: PoolClient,
+    schoolId: string,
+    classId: string,
+    startsAt: string,
+    endsAt: string,
+  ): Promise<void> {
+    const result = await client.query(
+      `SELECT 1
+       FROM classes
+       JOIN school_class_session_periods
+         USING (school_id, session)
+       WHERE classes.school_id = $1
+         AND classes.id = $2
+         AND school_class_session_periods.starts_at = $3::time
+         AND school_class_session_periods.ends_at = $4::time`,
+      [schoolId, classId, startsAt, endsAt],
+    );
+    if (!result.rowCount) {
+      throw new ConflictException(
+        'O horário deve corresponder a um turno configurado para a sessão da turma.',
+      );
+    }
+  }
+
   private async assertOutsideSchoolRecess(
     client: PoolClient,
     schoolId: string,
@@ -445,11 +464,18 @@ export class SchedulesService {
       return;
     }
     const result = await client.query<{ starts_at: string; ends_at: string }>(
-      `SELECT starts_at::text AS starts_at, ends_at::text AS ends_at
-       FROM school_recesses
-       WHERE school_id = $1
-         AND starts_at < $3::time
-         AND ends_at > $2::time`,
+      `SELECT recess.starts_at::text AS starts_at,
+              recess.ends_at::text AS ends_at
+       FROM school_recesses AS school_recess
+       CROSS JOIN LATERAL (
+         VALUES
+           (school_recess.starts_at, school_recess.ends_at),
+           (school_recess.afternoon_starts_at, school_recess.afternoon_ends_at)
+       ) AS recess(starts_at, ends_at)
+       WHERE school_recess.school_id = $1
+         AND recess.starts_at IS NOT NULL
+         AND recess.starts_at < $3::time
+         AND recess.ends_at > $2::time`,
       [schoolId, startsAt, endsAt],
     );
     if (result.rowCount) {

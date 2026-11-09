@@ -568,6 +568,79 @@ export class TeachersService {
     );
   }
 
+  async assignClass(
+    schoolId: string,
+    assignedBy: string,
+    teacherId: string,
+    classId: string,
+  ): Promise<{ classId: string; assigned: boolean; status: 'active' | 'pending' }> {
+    if (!UUID_PATTERN.test(teacherId) || !UUID_PATTERN.test(classId)) {
+      throw new BadRequestException('Selecione um professor e uma turma válidos.');
+    }
+
+    return this.database.transaction(async (client) => {
+      const teacher = await client.query(
+        `SELECT 1 FROM school_memberships
+         WHERE school_id = $1 AND user_id = $2
+           AND role = 'teacher' AND is_active = true`,
+        [schoolId, teacherId],
+      );
+
+      const schoolClass = await client.query(
+        'SELECT 1 FROM classes WHERE school_id = $1 AND id = $2',
+        [schoolId, classId],
+      );
+      if (schoolClass.rowCount !== 1) {
+        throw new NotFoundException('A turma selecionada não foi encontrada.');
+      }
+
+      if (teacher.rowCount !== 1) {
+        const invitation = await client.query<{ class_ids: string[] }>(
+          `SELECT class_ids FROM teacher_invitations
+           WHERE school_id = $1 AND id = $2
+             AND accepted_at IS NULL AND expires_at > now()
+           FOR UPDATE`,
+          [schoolId, teacherId],
+        );
+        const pendingInvitation = invitation.rows[0];
+        if (!pendingInvitation) {
+          throw new NotFoundException('Professor ativo ou convite pendente não encontrado.');
+        }
+        if (pendingInvitation.class_ids.includes(classId)) {
+          return { classId, assigned: false, status: 'pending' };
+        }
+        await client.query(
+          `UPDATE teacher_invitations
+          SET class_ids = array_append(class_ids, $3::uuid)
+           WHERE school_id = $1 AND id = $2`,
+          [schoolId, teacherId, classId],
+        );
+        await client.query(
+          `INSERT INTO audit_logs (school_id, actor_id, action, entity_type, entity_id, details)
+           VALUES ($1, $2, 'teacher.class_assigned', 'teacher_invitation', $3, $4::jsonb)`,
+          [schoolId, assignedBy, teacherId, JSON.stringify({ classId, status: 'pending' })],
+        );
+        return { classId, assigned: true, status: 'pending' };
+      }
+
+      const assignment = await client.query(
+        `INSERT INTO teacher_class_assignments (school_id, user_id, class_id)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (school_id, user_id, class_id) DO NOTHING
+         RETURNING class_id`,
+        [schoolId, teacherId, classId],
+      );
+      if (assignment.rowCount === 1) {
+        await client.query(
+          `INSERT INTO audit_logs (school_id, actor_id, action, entity_type, entity_id, details)
+           VALUES ($1, $2, 'teacher.class_assigned', 'teacher', $3, $4::jsonb)`,
+          [schoolId, assignedBy, teacherId, JSON.stringify({ classId })],
+        );
+      }
+      return { classId, assigned: assignment.rowCount === 1, status: 'active' };
+    });
+  }
+
   async updateSubjects(
     schoolId: string,
     updatedBy: string,

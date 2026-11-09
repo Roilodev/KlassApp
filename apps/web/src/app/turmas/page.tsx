@@ -4,7 +4,13 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { LogoutButton } from "../logout-button";
 import { ClassForm } from "./class-form";
-import type { ClassSchedule, SchoolClass } from "./class-form";
+import type {
+  ClassSchedule,
+  ClassScheduleTeacher,
+  ClassSubject,
+  SchoolClassSessions,
+  SchoolClass,
+} from "./class-form";
 import type { SchoolRecess } from "../school-recess";
 import { SectionIllustration } from "../section-illustration";
 
@@ -13,7 +19,10 @@ const apiUrl = process.env.API_INTERNAL_URL ?? "http://localhost:4000";
 async function getClasses(): Promise<{
   classes: SchoolClass[];
   schedules: ClassSchedule[];
+  subjects: ClassSubject[];
+  teachers: ClassScheduleTeacher[];
   recess: SchoolRecess;
+  classSessions: SchoolClassSessions;
 }> {
   const cookieStore = await cookies();
   if (!cookieStore.has("klassapp_session")) {
@@ -36,11 +45,22 @@ async function getClasses(): Promise<{
     redirect("/");
   }
 
-  const [classesResponse, rostersResponse, schedulesResponse, recessResponse] = await Promise.all([
+  const [
+    classesResponse,
+    rostersResponse,
+    schedulesResponse,
+    recessResponse,
+    sessionsResponse,
+    subjectsResponse,
+    teachersResponse,
+  ] = await Promise.all([
     fetch(`${apiUrl}/school-structure/classes`, { headers, cache: "no-store" }),
     fetch(`${apiUrl}/school-structure/classes/rosters`, { headers, cache: "no-store" }),
     fetch(`${apiUrl}/schedules`, { headers, cache: "no-store" }),
     fetch(`${apiUrl}/settings/school-recess`, { headers, cache: "no-store" }),
+    fetch(`${apiUrl}/settings/class-sessions`, { headers, cache: "no-store" }),
+    fetch(`${apiUrl}/subjects`, { headers, cache: "no-store" }),
+    fetch(`${apiUrl}/teachers`, { headers, cache: "no-store" }),
   ]);
   if (
     classesResponse.status === 401 ||
@@ -50,14 +70,28 @@ async function getClasses(): Promise<{
     schedulesResponse.status === 401 ||
     schedulesResponse.status === 403 ||
     recessResponse.status === 401 ||
-    recessResponse.status === 403
+    recessResponse.status === 403 ||
+    sessionsResponse.status === 401 ||
+    sessionsResponse.status === 403 ||
+    subjectsResponse.status === 401 ||
+    subjectsResponse.status === 403 ||
+    teachersResponse.status === 401 ||
+    teachersResponse.status === 403
   ) {
     redirect("/login");
   }
-  if (!classesResponse.ok || !rostersResponse.ok || !schedulesResponse.ok || !recessResponse.ok) {
+  if (
+    !classesResponse.ok ||
+    !rostersResponse.ok ||
+    !schedulesResponse.ok ||
+    !recessResponse.ok ||
+    !sessionsResponse.ok ||
+    !subjectsResponse.ok ||
+    !teachersResponse.ok
+  ) {
     throw new Error("Não foi possível carregar as turmas e seus horários.");
   }
-  const [classes, rosters, schedules, recess] = await Promise.all([
+  const [classes, rosters, schedules, recess, classSessions, subjects, teachers] = await Promise.all([
     classesResponse.json() as Promise<SchoolClass[]>,
     rostersResponse.json() as Promise<Array<{
       classId: string;
@@ -66,6 +100,9 @@ async function getClasses(): Promise<{
     }>>,
     schedulesResponse.json() as Promise<ClassSchedule[]>,
     recessResponse.json() as Promise<SchoolRecess>,
+    sessionsResponse.json() as Promise<SchoolClassSessions>,
+    subjectsResponse.json() as Promise<ClassSubject[]>,
+    teachersResponse.json() as Promise<ClassScheduleTeacher[]>,
   ]);
   const rostersByClass = new Map(
     rosters.map((roster) => [roster.classId, roster]),
@@ -77,7 +114,10 @@ async function getClasses(): Promise<{
       teachers: rostersByClass.get(schoolClass.id)?.teachers ?? [],
     })),
     schedules,
+    subjects,
+    teachers,
     recess,
+    classSessions,
   };
 }
 
@@ -90,7 +130,7 @@ export default function ClassesPage() {
 }
 
 async function ClassesDashboard() {
-  const { classes, schedules, recess } = await getClasses();
+  const { classes, schedules, subjects, teachers, recess, classSessions } = await getClasses();
   const cookieStore = await cookies();
   const sessionResponse = await fetch(`${apiUrl}/auth/me`, {
     headers: { cookie: cookieStore.toString() },
@@ -125,10 +165,6 @@ async function ClassesDashboard() {
           <Link className="nav-item" href="/alunos">
             <span className="nav-icon" aria-hidden="true">♧</span>
             <span>Alunos</span>
-          </Link>
-          <Link className="nav-item" href="/horarios">
-            <span className="nav-icon" aria-hidden="true">◷</span>
-            <span>Horários</span>
           </Link>
           <Link className="nav-item" href="/materias">
             <span className="nav-icon" aria-hidden="true">▤</span>
@@ -168,16 +204,14 @@ async function ClassesDashboard() {
           </div>
         </header>
 
-        <section className="welcome-section classes-welcome">
-          <div>
-            <p className="eyebrow">CADA TURMA, UM NOVO COMEÇO <span aria-hidden="true">✦</span></p>
-            <h1>Turmas e anos escolares <span aria-hidden="true">📚</span></h1>
-            <p className="welcome-copy">Organize os grupos da escola para preparar matrículas, horários e atividades.</p>
-          </div>
-          <SectionIllustration kind="classes" />
-        </section>
-
-        <ClassForm initialClasses={classes} initialSchedules={schedules} recess={recess} />
+        <ClassForm
+          initialClasses={classes}
+          initialSchedules={schedules}
+          subjects={subjects}
+          teachers={teachers}
+          recess={recess}
+          classSessions={classSessions}
+        />
 
         <footer className="page-footer">
           <span>Feito com carinho para a comunidade escolar</span>

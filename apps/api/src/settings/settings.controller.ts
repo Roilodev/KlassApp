@@ -29,4 +29,24 @@ export class SettingsController {
       body,
     );
   }
+
+  @Get('class-sessions')
+  getClassSessions(@Req() request: AuthenticatedRequest) {
+    return this.settings.getClassSessions(request.user.schoolId);
+  }
+
+  @Put('class-sessions')
+  saveClassSessions(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ) {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      throw new BadRequestException('Informe os turnos das sessões escolares.');
+    }
+    return this.settings.saveClassSessions(
+      request.user.schoolId,
+      request.user.id,
+      body,
+    );
+  }
 }

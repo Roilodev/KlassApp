@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import Link from "next/link";
 import type { SchoolClass } from "../turmas/class-form";
@@ -74,6 +74,25 @@ export function StudentManagement({
   const [submitting, setSubmitting] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [profileStudent, setProfileStudent] = useState<{ id: string; fullName: string } | null>(null);
+  const activeStudentsCount = students.filter((student) => student.isActive).length;
+  const inactiveStudentsCount = students.length - activeStudentsCount;
+
+  useEffect(() => {
+    function onPhotoUpdated(event: Event) {
+      const { kind, personId, hasPhoto } = (
+        event as CustomEvent<{ kind: string; personId: string; hasPhoto: boolean }>
+      ).detail;
+      if (kind !== "students") return;
+      setStudents((current) =>
+        current.map((student) =>
+          student.id === personId ? { ...student, hasPhoto } : student,
+        ),
+      );
+    }
+
+    window.addEventListener("klassapp:person-photo-updated", onPhotoUpdated);
+    return () => window.removeEventListener("klassapp:person-photo-updated", onPhotoUpdated);
+  }, []);
 
   const searchTerm = normalizeSearch(search.trim());
   const phoneSearch = search.replace(/\D/g, "");
@@ -227,11 +246,16 @@ export function StudentManagement({
       setCurrentPage(1);
       setSuccess("Aluno cadastrado e matriculado com sucesso.");
       setIsFormOpen(false);
+      setProfileStudent({ id: createdStudent.id, fullName: createdStudent.fullName });
     } catch {
       setError("Não foi possível conectar à KlassApp. Verifique se a API está iniciada.");
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function openStudentProfile(student: Student) {
+    setProfileStudent({ id: student.id, fullName: student.fullName });
   }
 
   return (
@@ -427,7 +451,10 @@ export function StudentManagement({
             >
               Novo aluno
             </button>
-            <span className="class-count">{students.length}</span>
+            <div className="student-status-counts" aria-label="Resumo de alunos">
+              <span className="student-status-count is-active">{activeStudentsCount} ativos</span>
+              <span className="student-status-count is-inactive">{inactiveStudentsCount} de baixa</span>
+            </div>
           </div>
         </div>
         {classes.length === 0 && (
@@ -478,6 +505,7 @@ export function StudentManagement({
                     <th scope="col">N.º</th>
                     <th scope="col">Aluno</th>
                     <th scope="col">Responsável</th>
+                    <th scope="col">Endereço</th>
                     <th scope="col">Estado</th>
                     <th scope="col">Ações</th>
                   </tr>
@@ -485,16 +513,38 @@ export function StudentManagement({
                 {studentGroups.map((group) => (
                   <tbody key={group.key}>
                     <tr className="student-table-group">
-                      <th colSpan={5} scope="rowgroup">
+                      <th colSpan={6} scope="rowgroup">
                         <span>{group.label}</span>
                         <small>{group.students.length} {group.students.length === 1 ? "aluno" : "alunos"}</small>
                       </th>
                     </tr>
                     {group.students.map((student) => (
-                      <tr key={student.id}>
+                      <tr
+                        aria-label={`${student.fullName}: abrir ficha`}
+                        className="student-table-clickable-row"
+                        key={student.id}
+                        onClick={() => openStudentProfile(student)}
+                        onKeyDown={(event) => {
+                          if (
+                            event.target === event.currentTarget &&
+                            (event.key === "Enter" || event.key === " ")
+                          ) {
+                            event.preventDefault();
+                            openStudentProfile(student);
+                          }
+                        }}
+                        tabIndex={0}
+                      >
                         <td>
                           <span className="student-table-number">
                             {studentNumbers.get(student.id)}
+                            {student.hasPhoto && (
+                              <span
+                                aria-label="Tem foto cadastrada"
+                                className="student-table-photo-indicator"
+                                role="img"
+                              />
+                            )}
                           </span>
                         </td>
                         <td>
@@ -526,6 +576,13 @@ export function StudentManagement({
                           )}
                         </td>
                         <td>
+                          {student.homeAddress ? (
+                            <span className="student-table-address">{student.homeAddress}</span>
+                          ) : (
+                            <span className="student-table-muted">Não informado</span>
+                          )}
+                        </td>
+                        <td>
                           <span className={`student-status-badge ${student.isActive ? "is-active" : "is-inactive"}`}>
                             {student.isActive ? "Ativo" : "Baja"}
                           </span>
@@ -533,7 +590,10 @@ export function StudentManagement({
                         <td className="student-table-row-actions-cell">
                           <button
                             className="student-table-row-action"
-                            onClick={() => setProfileStudent({ id: student.id, fullName: student.fullName })}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openStudentProfile(student);
+                            }}
                             type="button"
                           >
                             Ver ficha
