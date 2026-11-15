@@ -31,6 +31,7 @@ interface StudentResult {
   fullName: string;
   score: number | null;
   updatedAt: string | null;
+  whatsappAuthorized: boolean;
 }
 
 interface AssessmentManagementProps {
@@ -217,7 +218,10 @@ export function AssessmentManagement({
           method: "PUT",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ studentId: student.studentId, score: Number(rawScore) }),
+          body: JSON.stringify({
+            studentId: student.studentId,
+            score: Number(rawScore),
+          }),
         },
       );
       if (!response.ok) {
@@ -455,8 +459,32 @@ export function AssessmentManagement({
                     className="assessment-save-button"
                     disabled={Boolean(savingStudentId)}
                     onClick={() => saveScore(student)}
+                    title={student.whatsappAuthorized
+                      ? "Envío por WhatsApp autorizado por el responsable"
+                      : undefined}
                     type="button"
                   >
+                    {student.whatsappAuthorized && (
+                      <svg
+                        aria-label="Notificación por WhatsApp autorizada"
+                        className="assessment-whatsapp-icon"
+                        role="img"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          d="M12 2.25a9.7 9.7 0 0 0-8.37 14.6L2.3 21.7l5.02-1.3A9.7 9.7 0 1 0 12 2.25Z"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="1.8"
+                        />
+                        <path
+                          d="M8.25 7.5c-.25 0-.62.1-.94.47-.32.36-1.23 1.2-1.23 2.94s1.26 3.42 1.44 3.66c.18.23 2.44 3.9 6.03 5.3 2.98 1.16 3.59.93 4.24.87.65-.06 2.1-.86 2.4-1.7.3-.83.3-1.55.21-1.7-.09-.15-.33-.24-.69-.42-.36-.18-2.1-1.04-2.43-1.16-.33-.12-.57-.18-.81.18-.24.36-.93 1.16-1.14 1.4-.21.24-.42.27-.78.09-.36-.18-1.51-.56-2.88-1.78-1.06-.94-1.78-2.1-1.99-2.46-.21-.36-.02-.55.16-.73.16-.16.36-.42.54-.63.18-.21.24-.36.36-.6.12-.24.06-.45-.03-.63-.09-.18-.8-1.93-1.11-2.64-.29-.68-.58-.59-.8-.6h-.68Z"
+                          fill="currentColor"
+                        />
+                      </svg>
+                    )}
                     {savingStudentId === student.studentId ? "Salvando..." : "Salvar"}
                   </button>
                 </li>

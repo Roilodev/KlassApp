@@ -38,6 +38,14 @@ interface DashboardSummary {
   activeTeachers: number | null;
   requiredTeachers: number | null;
   configuredSubjectFrequencies: number | null;
+  requiredSubjectLessons: number | null;
+  scheduledSubjectLessons: number | null;
+  coveredSubjectLessons: number | null;
+  unconfiguredSubjectFrequencies: number | null;
+  unassignedSubjectPeriods: number | null;
+  excessSubjectPeriods: number | null;
+  classesWithoutSubjectFrequencies: number | null;
+  classesWithoutConfiguredSessionPeriods: number | null;
   schedules: number;
   classesWithIncompleteSchedules: number | null;
   events: number | null;
@@ -48,6 +56,7 @@ interface DashboardSummary {
   configuredEvents: number | null;
   morningSessionPeriods: number | null;
   afternoonSessionPeriods: number | null;
+  nightSessionPeriods: number | null;
   configuredStudents: number | null;
 }
 
@@ -68,8 +77,15 @@ interface SetupProgressItem {
 interface DashboardObservation {
   type: string;
   title: string;
-  href: string;
+  href: string | null;
   items: string[];
+}
+
+interface DashboardObservationCard {
+  key: string;
+  title: string;
+  href: string | null;
+  item: string;
 }
 
 async function getDashboardSummary(headers: { cookie: string }): Promise<DashboardSummary> {
@@ -132,17 +148,14 @@ function getSetupProgress(summary: DashboardSummary): SetupProgressItem[] {
     {
       label: "Sessões e turnos",
       icon: "◷",
-      ready: (summary.morningSessionPeriods ?? 0) > 0 &&
-        (summary.afternoonSessionPeriods ?? 0) > 0,
+      ready: (summary.morningSessionPeriods ?? 0) +
+        (summary.afternoonSessionPeriods ?? 0) +
+        (summary.nightSessionPeriods ?? 0) > 0,
     },
     {
-      label: summary.requiredTeachers === null
-        ? "Professores"
-        : `Professores (${summary.activeTeachers ?? 0} de ${summary.requiredTeachers})`,
+      label: "Professores",
       icon: "♙",
-      ready: (summary.activeTeachers ?? 0) > 0 &&
-        summary.requiredTeachers !== null &&
-        (summary.activeTeachers ?? 0) >= summary.requiredTeachers,
+      ready: (summary.activeTeachers ?? 0) > 0,
     },
     {
       label: "Alunos",
@@ -150,15 +163,14 @@ function getSetupProgress(summary: DashboardSummary): SetupProgressItem[] {
       ready: (summary.configuredStudents ?? 0) > 0,
     },
     {
-      label: "Disciplinas",
+      label: "Matérias",
       icon: "▤",
-      ready: summary.subjects > 0 &&
-        summary.configuredSubjectFrequencies === summary.subjects,
+      ready: summary.subjects > 0,
     },
     {
       label: "Horários",
       icon: "◷",
-      ready: summary.schedules > 0 && summary.classesWithIncompleteSchedules === 0,
+      ready: summary.schedules > 0,
     },
     { label: "Eventos", icon: "▣", ready: (summary.configuredEvents ?? 0) > 0 },
   ];
@@ -208,10 +220,16 @@ async function Dashboard() {
   const setupItems = session.school.role === "admin"
     ? getSetupProgress(summary)
     : [];
-  const configuredCount = setupItems.filter((item) => item.ready).length;
-  const setupPercent = setupItems.length
-    ? Math.round((configuredCount / setupItems.length) * 100)
-    : 0;
+  const dashboardObservations: DashboardObservationCard[] = session.school.role === "admin"
+    ? observations.flatMap((observation) =>
+        observation.items.map((item, index) => ({
+          key: `${observation.type}-${index}`,
+          title: observation.title,
+          href: observation.href,
+          item,
+        })),
+      )
+    : [];
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -275,7 +293,6 @@ async function Dashboard() {
               <div>
                 <h2 id="setup-title">Configuração inicial</h2>
               </div>
-              <strong className="setup-flow-progress">{setupPercent}%</strong>
             </div>
             <ol className="setup-flow-list">
               {setupItems.map((item, index) => (
@@ -456,34 +473,27 @@ async function Dashboard() {
                 <h2 id="dashboard-observations-title">Observações</h2>
               </div>
               <span className="dashboard-observations-count">
-                {observations.reduce((count, observation) => count + observation.items.length, 0)}
+                {dashboardObservations.length}
               </span>
             </div>
-            {observations.length === 0 ? (
+            {dashboardObservations.length === 0 ? (
               <p className="dashboard-observations-empty">
                 Tudo em ordem. Não há itens que precisem de atenção agora.
               </p>
             ) : (
               <div className="dashboard-observation-grid">
-                {observations.map((observation) => (
-                  <article className="dashboard-observation" key={observation.type}>
+                {dashboardObservations.map((observation) => (
+                  <article className="dashboard-observation" key={observation.key}>
                     <div className="dashboard-observation-title">
                       <h3>{observation.title}</h3>
-                      <span>{observation.items.length}</span>
+                      <span className="dashboard-observation-status">Pendente</span>
                     </div>
-                    <ul>
-                      {observation.items.slice(0, 5).map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                    {observation.items.length > 5 && (
-                      <p className="dashboard-observation-more">
-                        E mais {observation.items.length - 5} itens.
-                      </p>
+                    <p className="dashboard-observation-item">{observation.item}</p>
+                    {observation.href && (
+                      <Link href={observation.href}>
+                        Ver registros <span aria-hidden="true">→</span>
+                      </Link>
                     )}
-                    <Link href={observation.href}>
-                      Ver registros <span aria-hidden="true">→</span>
-                    </Link>
                   </article>
                 ))}
               </div>

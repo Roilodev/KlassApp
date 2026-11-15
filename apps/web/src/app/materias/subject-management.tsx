@@ -7,15 +7,38 @@ import type { SchoolSubject } from "../horarios/schedule-management";
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
+type SchoolClassSession = "morning" | "afternoon" | "night";
+
+interface SchoolClass {
+  grade: string;
+  session: SchoolClassSession;
+}
+
+interface SchoolClassSessions {
+  morning: Array<{ startsAt: string; endsAt: string }>;
+  afternoon: Array<{ startsAt: string; endsAt: string }>;
+  night: Array<{ startsAt: string; endsAt: string }>;
+}
+
 interface SubjectManagementProps {
   initialSubjects: SchoolSubject[];
   grades: string[];
+  classes: SchoolClass[];
+  classSessions: SchoolClassSessions | null;
   readOnly?: boolean;
 }
+
+const sessionLabels: Record<SchoolClassSession, string> = {
+  morning: "Manhã",
+  afternoon: "Tarde",
+  night: "Noite",
+};
 
 export function SubjectManagement({
   initialSubjects,
   grades,
+  classes,
+  classSessions,
   readOnly = false,
 }: SubjectManagementProps) {
   const [subjects, setSubjects] = useState(initialSubjects);
@@ -56,6 +79,21 @@ export function SubjectManagement({
     event.preventDefault();
     setError("");
     setMessage("");
+    const existingSubject = subjects.find((subject) => subject.id === editingId);
+    const removedGrades = existingSubject?.gradeFrequencies
+      .map((assignment) => assignment.grade)
+      .filter((grade) => !gradeFrequencies.some((assignment) => assignment.grade === grade)) ?? [];
+    if (
+      removedGrades.length > 0 &&
+      !window.confirm(
+        `Remover a frequência semanal de ${removedGrades.join(", ")}?\n\n` +
+        `Os horários semanais dessa matéria em todas as turmas desses anos escolares, ` +
+        `inclusive de anos letivos anteriores, serão removidos. ` +
+        "O histórico das avaliações será preservado.\n\nDeseja continuar?",
+      )
+    ) {
+      return;
+    }
     setSubmitting(true);
     try {
       const response = await fetch(
@@ -142,62 +180,91 @@ export function SubjectManagement({
             </label>
             <fieldset className="subject-grade-frequency-list">
               <legend>Anos escolares e frequência semanal</legend>
-              {gradeFrequencies.map((assignment, index) => (
-                <div className="subject-grade-frequency-row" key={`${assignment.grade}-${index}`}>
-                  <label>
-                    Ano escolar
-                    <select
-                      onChange={(event) => setGradeFrequencies((current) =>
-                        current.map((item, itemIndex) =>
-                          itemIndex === index ? { ...item, grade: event.target.value } : item,
-                        ),
-                      )}
-                      required
-                      value={assignment.grade}
+              {gradeFrequencies.map((assignment, index) => {
+                const coverage = getGradeSessionCoverage(
+                  assignment.grade,
+                  subjects,
+                  classes,
+                  classSessions,
+                  gradeFrequencies,
+                  editingId,
+                );
+                return (
+                  <div className="subject-grade-frequency-row" key={`${assignment.grade}-${index}`}>
+                    <label>
+                      Ano escolar
+                      <select
+                        onChange={(event) => setGradeFrequencies((current) =>
+                          current.map((item, itemIndex) =>
+                            itemIndex === index ? { ...item, grade: event.target.value } : item,
+                          ),
+                        )}
+                        required
+                        value={assignment.grade}
+                      >
+                        <option disabled value="">Selecione um ano</option>
+                        {grades.map((grade) => (
+                          <option
+                            disabled={gradeFrequencies.some(
+                              (item, itemIndex) => itemIndex !== index && item.grade === grade,
+                            )}
+                            key={grade}
+                            value={grade}
+                          >
+                            {grade}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Aulas por semana
+                      <input
+                        max="40"
+                        min="1"
+                        onChange={(event) => setGradeFrequencies((current) =>
+                          current.map((item, itemIndex) =>
+                            itemIndex === index
+                              ? { ...item, weeklyFrequency: event.target.value }
+                              : item,
+                          ),
+                        )}
+                        required
+                        type="number"
+                        value={assignment.weeklyFrequency}
+                      />
+                    </label>
+                    <div
+                      aria-label={`Cobertura semanal para ${assignment.grade || "ano escolar"}`}
+                      className="subject-frequency-coverage-inline"
+                      title="Soma das frequências do ano comparada com os períodos disponíveis nesta sessão."
                     >
-                      <option disabled value="">Selecione um ano</option>
-                      {grades.map((grade) => (
-                        <option
-                          disabled={gradeFrequencies.some(
-                            (item, itemIndex) => itemIndex !== index && item.grade === grade,
-                          )}
-                          key={grade}
-                          value={grade}
-                        >
-                          {grade}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Aulas por semana
-                    <input
-                      max="40"
-                      min="1"
-                      onChange={(event) => setGradeFrequencies((current) =>
-                        current.map((item, itemIndex) =>
-                          itemIndex === index
-                            ? { ...item, weeklyFrequency: event.target.value }
-                            : item,
-                        ),
+                      <strong className="subject-frequency-coverage-title">
+                        Cobertura semanal
+                      </strong>
+                      {coverage.length > 0
+                        ? coverage.map((item) => (
+                          <span
+                            className={`subject-frequency-coverage-${item.status}`}
+                            key={item.session}
+                          >
+                            <strong>{sessionLabels[item.session]}:</strong> {item.message}
+                          </span>
+                        ))
+                        : <span>Sem turmas cadastradas para este ano.</span>}
+                    </div>
+                    <button
+                      aria-label={`Remover ${assignment.grade || "ano escolar"} da matéria`}
+                      className="subject-grade-remove"
+                      onClick={() => setGradeFrequencies((current) =>
+                        current.filter((_, itemIndex) => itemIndex !== index),
                       )}
-                      required
-                      type="number"
-                      value={assignment.weeklyFrequency}
-                    />
-                  </label>
-                  <button
-                    aria-label={`Remover ${assignment.grade || "ano escolar"} da matéria`}
-                    className="subject-grade-remove"
-                    onClick={() => setGradeFrequencies((current) =>
-                      current.filter((_, itemIndex) => itemIndex !== index),
-                    )}
-                    type="button"
-                  >
-                    Remover
-                  </button>
-                </div>
-              ))}
+                      type="button"
+                    >
+                      Remover
+                    </button>
+                  </div>
+                );
+              })}
               <button
                 className="class-cancel-edit subject-grade-add"
                 disabled={gradeFrequencies.length >= grades.length}
@@ -315,6 +382,90 @@ export function SubjectManagement({
       </section>
     </>
   );
+}
+
+function getGradeSessionCoverage(
+  grade: string,
+  subjects: SchoolSubject[],
+  classes: SchoolClass[],
+  classSessions: SchoolClassSessions | null,
+  draftFrequencies: Array<{ grade: string; weeklyFrequency: string }>,
+  editingId: string | null,
+) {
+  const gradeSessions = new Set<SchoolClassSession>();
+  for (const schoolClass of classes) {
+    if (schoolClass.grade === grade) {
+      gradeSessions.add(schoolClass.session);
+    }
+  }
+
+  const draftByGrade = new Map(
+    draftFrequencies.map((assignment) => [assignment.grade, assignment.weeklyFrequency]),
+  );
+  const sessionOrder: SchoolClassSession[] = ["morning", "afternoon", "night"];
+  let totalFrequency = 0;
+  let hasUnconfiguredFrequency = false;
+  for (const subject of subjects) {
+    if (subject.id === editingId) {
+      continue;
+    }
+    const frequency = subject.gradeFrequencies.find(
+      (assignment) => assignment.grade === grade,
+    )?.weeklyFrequency;
+    if (frequency === null) {
+      hasUnconfiguredFrequency = true;
+    } else if (frequency !== undefined) {
+      totalFrequency += frequency;
+    }
+  }
+
+  if (draftByGrade.has(grade)) {
+    const draftFrequency = Number(draftByGrade.get(grade));
+    if (Number.isInteger(draftFrequency) && draftFrequency >= 1 && draftFrequency <= 40) {
+      totalFrequency += draftFrequency;
+    } else {
+      hasUnconfiguredFrequency = true;
+    }
+  }
+
+  return sessionOrder
+    .filter((session) => gradeSessions.has(session))
+    .map((session) => {
+      const availablePeriods = classSessions ? classSessions[session].length * 5 : 0;
+      if (availablePeriods === 0) {
+        return {
+          session,
+          status: "unconfigured",
+          message: "períodos não configurados",
+        };
+      }
+      if (hasUnconfiguredFrequency) {
+        return {
+          session,
+          status: "incomplete",
+          message: `ao menos ${totalFrequency}/${availablePeriods}; frequências pendentes`,
+        };
+      }
+      if (totalFrequency < availablePeriods) {
+        return {
+          session,
+          status: "under",
+          message: `${totalFrequency}/${availablePeriods} (faltam ${availablePeriods - totalFrequency})`,
+        };
+      }
+      if (totalFrequency > availablePeriods) {
+        return {
+          session,
+          status: "over",
+          message: `${totalFrequency}/${availablePeriods} (excede ${totalFrequency - availablePeriods})`,
+        };
+      }
+      return {
+        session,
+        status: "balanced",
+        message: `${totalFrequency}/${availablePeriods} (completa)`,
+      };
+    });
 }
 
 async function showRequestError(

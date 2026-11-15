@@ -8,6 +8,19 @@ import { SubjectManagement } from "./subject-management";
 
 const apiUrl = process.env.API_INTERNAL_URL ?? "http://localhost:4000";
 
+type SchoolClassSession = "morning" | "afternoon" | "night";
+
+interface ClassSessionPeriod {
+  startsAt: string;
+  endsAt: string;
+}
+
+interface SchoolClassSessions {
+  morning: ClassSessionPeriod[];
+  afternoon: ClassSessionPeriod[];
+  night: ClassSessionPeriod[];
+}
+
 export default function SubjectsPage() {
   return (
     <Suspense fallback={<main className="loading-screen">Carregando as matérias...</main>}>
@@ -35,27 +48,42 @@ async function SubjectsDashboard() {
   const session = await sessionResponse.json();
   const isAdmin = session.school.role === "admin";
 
-  const [response, classesResponse] = await Promise.all([
+  const [response, classesResponse, sessionsResponse] = await Promise.all([
     fetch(`${apiUrl}/subjects`, { headers, cache: "no-store" }),
     isAdmin
       ? fetch(`${apiUrl}/school-structure/classes`, { headers, cache: "no-store" })
+      : Promise.resolve(null),
+    isAdmin
+      ? fetch(`${apiUrl}/settings/class-sessions`, { headers, cache: "no-store" })
       : Promise.resolve(null),
   ]);
   if (
     response.status === 401 ||
     response.status === 403 ||
     classesResponse?.status === 401 ||
-    classesResponse?.status === 403
+    classesResponse?.status === 403 ||
+    sessionsResponse?.status === 401 ||
+    sessionsResponse?.status === 403
   ) {
     redirect("/login");
   }
-  if (!response.ok || (classesResponse && !classesResponse.ok)) {
+  if (
+    !response.ok ||
+    (classesResponse && !classesResponse.ok) ||
+    (sessionsResponse && !sessionsResponse.ok)
+  ) {
     throw new Error("Não foi possível carregar as matérias.");
   }
   const subjects = await response.json() as SchoolSubject[];
   const classes = classesResponse
-    ? await classesResponse.json() as Array<{ grade: string }>
+    ? await classesResponse.json() as Array<{
+      grade: string;
+      session: SchoolClassSession;
+    }>
     : [];
+  const classSessions = sessionsResponse
+    ? await sessionsResponse.json() as SchoolClassSessions
+    : null;
   const grades = [...new Set(classes.map((schoolClass) => schoolClass.grade))]
     .sort((left, right) => left.localeCompare(right));
 
@@ -127,7 +155,13 @@ async function SubjectsDashboard() {
             </p>
           </div>
         </section>
-        <SubjectManagement initialSubjects={subjects} grades={grades} readOnly={!isAdmin} />
+        <SubjectManagement
+          classSessions={classSessions}
+          classes={classes}
+          initialSubjects={subjects}
+          grades={grades}
+          readOnly={!isAdmin}
+        />
         <footer className="page-footer">
           <span>Feito com carinho para a comunidade escolar</span>
           <span aria-hidden="true">♥</span>

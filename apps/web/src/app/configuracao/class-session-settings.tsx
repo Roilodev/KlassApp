@@ -13,6 +13,7 @@ export interface ClassSessionPeriod {
 export interface SchoolClassSessions {
   morning: ClassSessionPeriod[];
   afternoon: ClassSessionPeriod[];
+  night: ClassSessionPeriod[];
 }
 
 interface ClassSessionSettingsProps {
@@ -22,6 +23,7 @@ interface ClassSessionSettingsProps {
 const sessionOptions = [
   { key: "morning", label: "Manhã" },
   { key: "afternoon", label: "Tarde" },
+  { key: "night", label: "Noite" },
 ] as const;
 
 export function ClassSessionSettings({ initialSessions }: ClassSessionSettingsProps) {
@@ -112,7 +114,7 @@ export function ClassSessionSettings({ initialSessions }: ClassSessionSettingsPr
         </div>
       </div>
       <p className="student-create-hint">
-        Configure os turnos da manhã e da tarde. As aulas do horário semanal devem corresponder a um dos turnos definidos para a sessão de cada turma.
+        Configure os turnos da manhã, da tarde e da noite. As aulas do horário semanal devem corresponder a um dos turnos definidos para a sessão de cada turma.
       </p>
       <form className="class-session-settings-form" onSubmit={saveSessions}>
         <div className="class-session-grid">

@@ -53,6 +53,12 @@ interface ScheduleManagementProps {
   classSessions: SchoolClassSessions;
 }
 
+function getSessionLabel(session: SchoolClass["session"]): string {
+  if (session === "afternoon") return "Tarde";
+  if (session === "night") return "Noite";
+  return "Manhã";
+}
+
 function sortSchedules(schedules: ScheduleRecord[]) {
   return [...schedules].sort(
     (left, right) =>
@@ -281,7 +287,7 @@ export function ScheduleManagement({
               >
                 {classes.map((schoolClass) => (
                   <option key={schoolClass.id} value={schoolClass.id}>
-                    {schoolClass.grade} · Turma {schoolClass.name} · {schoolClass.year} · {schoolClass.session === "afternoon" ? "Tarde" : "Manhã"}
+                    {schoolClass.grade} · Turma {schoolClass.name} · {schoolClass.year} · {getSessionLabel(schoolClass.session)}
                   </option>
                 ))}
               </select>
@@ -479,9 +485,7 @@ export function ScheduleManagement({
                           <strong>{schedule.subject}</strong>
                           <small>
                             {schedule.classLabel} · {schedule.year} ·{" "}
-                            {classes.find((schoolClass) => schoolClass.id === schedule.classId)?.session === "afternoon"
-                              ? "Tarde"
-                              : "Manhã"}
+                            {getSessionLabel(classes.find((schoolClass) => schoolClass.id === schedule.classId)?.session)}
                           </small>
                           <small>{schedule.teacherName ?? "Professor não definido"}</small>
                         </span>

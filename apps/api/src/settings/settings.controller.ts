@@ -35,6 +35,23 @@ export class SettingsController {
     return this.settings.getClassSessions(request.user.schoolId);
   }
 
+  @Get('teacher-workload')
+  getTeacherWorkload(@Req() request: AuthenticatedRequest) {
+    return this.settings.getTeacherWorkload(request.user.schoolId);
+  }
+
+  @Put('teacher-workload')
+  saveTeacherWorkload(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ) {
+    return this.settings.saveTeacherWorkload(
+      request.user.schoolId,
+      request.user.id,
+      body,
+    );
+  }
+
   @Put('class-sessions')
   saveClassSessions(
     @Req() request: AuthenticatedRequest,

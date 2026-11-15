@@ -9,7 +9,7 @@ async function bootstrap() {
     limit: '5mb',
   });
   app.enableCors({
-    origin: process.env.WEB_ORIGIN ?? 'http://localhost:3000',
+    origin: process.env.WEB_ORIGIN ?? 'http://localhost:3001',
     credentials: true,
   });
   app.enableShutdownHooks();

@@ -276,6 +276,44 @@ describe('SchedulesService', () => {
     );
   });
 
+  it('rejects a night class schedule during the night recess', async () => {
+    const queryHandler = vi.fn(async (sql: string) => {
+      if (sql.includes('pg_advisory_xact_lock')) {
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes('SELECT id FROM classes')) {
+        return { rows: [{ id: validInput.classId }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT id FROM school_subjects')) {
+        return { rows: [{ id: validInput.subjectId }], rowCount: 1 };
+      }
+      if (sql.includes('JOIN school_class_session_periods')) {
+        return { rows: [{}], rowCount: 1 };
+      }
+      if (sql.includes('FROM school_recesses')) {
+        return {
+          rows: [{ starts_at: '20:00:00', ends_at: '20:20:00' }],
+          rowCount: 1,
+        };
+      }
+      return { rows: [], rowCount: 0 };
+    });
+    const { service, query } = makeService(queryHandler);
+    const nightSchedule = { ...validInput, startsAt: '20:10', endsAt: '20:50' };
+
+    await expect(
+      service.create('school-id', 'user-id', nightSchedule),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("('night', school_recess.night_starts_at"),
+      ['school-id', validInput.classId, nightSchedule.startsAt, nightSchedule.endsAt],
+    );
+    expect(query).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO class_schedules'),
+      expect.anything(),
+    );
+  });
+
   it('creates a schedule with any active teacher in the school', async () => {
     const teacherId = '323e4567-e89b-42d3-a456-426614174000';
     const queryHandler = vi.fn(async (sql: string) => {

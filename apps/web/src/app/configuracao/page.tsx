@@ -7,6 +7,7 @@ import type { SchoolRecess } from "../school-recess";
 import { ClassSessionSettings } from "./class-session-settings";
 import type { SchoolClassSessions } from "./class-session-settings";
 import { RecessSettings } from "./recess-settings";
+import { TeacherWorkloadSettings } from "./teacher-workload-settings";
 
 const apiUrl = process.env.API_INTERNAL_URL ?? "http://localhost:4000";
 
@@ -36,24 +37,28 @@ async function ConfigurationDashboard() {
     redirect("/");
   }
 
-  const [recessResponse, sessionsResponse] = await Promise.all([
+  const [recessResponse, sessionsResponse, workloadResponse] = await Promise.all([
     fetch(`${apiUrl}/settings/school-recess`, { headers, cache: "no-store" }),
     fetch(`${apiUrl}/settings/class-sessions`, { headers, cache: "no-store" }),
+    fetch(`${apiUrl}/settings/teacher-workload`, { headers, cache: "no-store" }),
   ]);
   if (
     recessResponse.status === 401 ||
     recessResponse.status === 403 ||
     sessionsResponse.status === 401 ||
-    sessionsResponse.status === 403
+    sessionsResponse.status === 403 ||
+    workloadResponse.status === 401 ||
+    workloadResponse.status === 403
   ) {
     redirect("/login");
   }
-  if (!recessResponse.ok || !sessionsResponse.ok) {
+  if (!recessResponse.ok || !sessionsResponse.ok || !workloadResponse.ok) {
     throw new Error("Não foi possível carregar as configurações da rotina escolar.");
   }
-  const [recess, sessions] = await Promise.all([
+  const [recess, sessions, workload] = await Promise.all([
     recessResponse.json() as Promise<SchoolRecess>,
     sessionsResponse.json() as Promise<SchoolClassSessions>,
+    workloadResponse.json() as Promise<{ maxWeeklyPeriods: number | null }>,
   ]);
 
   return (
@@ -93,11 +98,12 @@ async function ConfigurationDashboard() {
           <div>
             <p className="eyebrow">AJUSTES DA ESCOLA <span aria-hidden="true">✦</span></p>
             <h1>Configuração escolar <span aria-hidden="true">⚙</span></h1>
-            <p className="welcome-copy">Defina os horários que fazem parte da rotina semanal da escola.</p>
+            <p className="welcome-copy">Defina os turnos, os recreios e a carga máxima semanal dos professores.</p>
           </div>
         </section>
 
         <ClassSessionSettings initialSessions={sessions} />
+        <TeacherWorkloadSettings initialMaxWeeklyPeriods={workload.maxWeeklyPeriods} />
         <RecessSettings initialRecess={recess} />
         <footer className="page-footer">
           <span>Feito com carinho para a comunidade escolar</span>

@@ -352,9 +352,15 @@ button {
 
 .subject-grade-frequency-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr) auto;
-  align-items: end;
+  grid-template-columns: minmax(110px, 0.9fr) minmax(100px, 0.7fr) minmax(110px, 0.9fr) auto;
+  align-items: center;
   gap: 9px;
+}
+
+.subject-frequency-coverage-title {
+  color: #435067;
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .subject-grade-remove {
@@ -378,6 +384,38 @@ button {
   margin: 0;
   color: #727d91;
   font-size: 13px;
+}
+
+.subject-frequency-coverage-inline {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: #727d91;
+  font-size: 11px;
+}
+
+.subject-frequency-coverage-inline span {
+  display: block;
+  overflow-wrap: anywhere;
+  padding: 3px 6px;
+  border-radius: 6px;
+}
+
+.subject-frequency-coverage-inline strong {
+  color: #435067;
+}
+
+.subject-frequency-coverage-under,
+.subject-frequency-coverage-over,
+.subject-frequency-coverage-incomplete,
+.subject-frequency-coverage-unconfigured {
+  background: #fff5e3;
+  color: #825d24;
+}
+
+.subject-frequency-coverage-balanced {
+  background: #eaf6ed;
+  color: #376b46;
 }
 
 .subject-required-notice {
@@ -1632,7 +1670,7 @@ h1 span {
 
 .school-recess-sessions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
 }
 
@@ -1705,9 +1743,30 @@ h1 span {
   gap: 18px;
 }
 
+.teacher-workload-field {
+  display: grid;
+  width: min(100%, 360px);
+  gap: 7px;
+  color: #465168;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.teacher-workload-field input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 43px;
+  padding: 8px 10px;
+  border: 1px solid #e4e0ea;
+  border-radius: 9px;
+  background: #fff;
+  color: #39445a;
+  font: inherit;
+}
+
 .class-session-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
 }
 
@@ -2653,6 +2712,18 @@ h1 span {
   font-weight: 700;
 }
 
+.assessment-save-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.assessment-whatsapp-icon {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+}
+
 .assessment-list-actions {
   display: flex;
   flex: 0 0 auto;
@@ -3208,6 +3279,10 @@ h1 span {
   color: #53658f;
 }
 
+.class-session-indicator-night {
+  color: #6f5497;
+}
+
 .class-schedule-indicator {
   position: relative;
   display: grid;
@@ -3226,8 +3301,7 @@ h1 span {
   stroke-width: 1.8;
 }
 
-.schedule-status-dot,
-.schedule-status-cross {
+.schedule-status-dot {
   position: absolute;
   top: -3px;
   right: -3px;
@@ -3243,15 +3317,8 @@ h1 span {
   background: #2c9b5b;
 }
 
-.schedule-status-cross {
-  width: 10px;
-  height: 10px;
-  border: 0;
-  background: white;
-  color: #d33b36;
-  font-size: 15px;
-  font-weight: 800;
-  line-height: 10px;
+.schedule-status-dot-incomplete {
+  background: #d33b36;
 }
 
 .class-card-button:focus-visible {
@@ -6384,31 +6451,23 @@ h1 span {
   font-size: 14px;
 }
 
-.dashboard-observation-title > span {
+.dashboard-observation-status {
   flex: 0 0 auto;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: #fff1dc;
   color: #a76b30;
-  font-size: 13px;
+  font-size: 10px;
   font-weight: 800;
+  line-height: 1;
 }
 
-.dashboard-observation ul {
-  display: grid;
-  gap: 5px;
+.dashboard-observation-item {
   margin: 0;
-  padding-left: 17px;
   color: #6d6a64;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.4;
-}
-
-.dashboard-observation li {
   overflow-wrap: anywhere;
-}
-
-.dashboard-observation-more {
-  margin: 0;
-  color: #858078;
-  font-size: 12px;
 }
 
 .dashboard-observation > a {
@@ -6767,6 +6826,10 @@ h1 span {
 
   .subject-grade-frequency-row {
     grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr);
+  }
+
+  .subject-frequency-coverage-inline {
+    grid-column: 1 / -1;
   }
 
   .subject-grade-remove {

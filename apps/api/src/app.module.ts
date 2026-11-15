@@ -22,6 +22,7 @@ import { EventsController } from './events/events.controller.js';
 import { EventsService } from './events/events.service.js';
 import { AssessmentsController } from './assessments/assessments.controller.js';
 import { AssessmentsService } from './assessments/assessments.service.js';
+import { AssessmentWebhookService } from './assessments/assessment-webhook.service.js';
 import { BehaviorController } from './behavior/behavior.controller.js';
 import { BehaviorService } from './behavior/behavior.service.js';
 import { ProfilesController } from './profiles/profiles.controller.js';
@@ -69,6 +70,7 @@ import { SettingsService } from './settings/settings.service.js';
     SchedulesService,
     EventsService,
     AssessmentsService,
+    AssessmentWebhookService,
     BehaviorService,
     ProfilesService,
     DashboardService,

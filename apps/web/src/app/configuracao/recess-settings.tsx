@@ -19,6 +19,11 @@ export function RecessSettings({ initialRecess }: RecessSettingsProps) {
   );
   const [afternoonStartsAt, setAfternoonStartsAt] = useState(initialRecess.afternoonStartsAt ?? "");
   const [afternoonEndsAt, setAfternoonEndsAt] = useState(initialRecess.afternoonEndsAt ?? "");
+  const [nightEnabled, setNightEnabled] = useState(
+    Boolean(initialRecess.nightStartsAt && initialRecess.nightEndsAt),
+  );
+  const [nightStartsAt, setNightStartsAt] = useState(initialRecess.nightStartsAt ?? "");
+  const [nightEndsAt, setNightEndsAt] = useState(initialRecess.nightEndsAt ?? "");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -39,6 +44,8 @@ export function RecessSettings({ initialRecess }: RecessSettingsProps) {
           endsAt: morningEnabled ? endsAt : null,
           afternoonStartsAt: afternoonEnabled ? afternoonStartsAt : null,
           afternoonEndsAt: afternoonEnabled ? afternoonEndsAt : null,
+          nightStartsAt: nightEnabled ? nightStartsAt : null,
+          nightEndsAt: nightEnabled ? nightEndsAt : null,
         }),
       });
       if (!response.ok) {
@@ -66,6 +73,9 @@ export function RecessSettings({ initialRecess }: RecessSettingsProps) {
       setAfternoonEnabled(Boolean(saved.afternoonStartsAt && saved.afternoonEndsAt));
       setAfternoonStartsAt(saved.afternoonStartsAt ?? "");
       setAfternoonEndsAt(saved.afternoonEndsAt ?? "");
+      setNightEnabled(Boolean(saved.nightStartsAt && saved.nightEndsAt));
+      setNightStartsAt(saved.nightStartsAt ?? "");
+      setNightEndsAt(saved.nightEndsAt ?? "");
       setMessage("Horários dos recreios salvos.");
     } catch {
       setError("Não foi possível conectar à KlassApp. Verifique se a API está iniciada.");
@@ -83,7 +93,7 @@ export function RecessSettings({ initialRecess }: RecessSettingsProps) {
         </div>
       </div>
       <p className="student-create-hint">
-        Defina os horários de recreio para as sessões da manhã e da tarde.
+        Defina os horários de recreio para as sessões da manhã, da tarde e da noite.
       </p>
       <form className="school-recess-form" onSubmit={saveRecess}>
         <div className="school-recess-sessions">
@@ -149,6 +159,39 @@ export function RecessSettings({ initialRecess }: RecessSettingsProps) {
                   required={afternoonEnabled}
                   type="time"
                   value={afternoonEndsAt}
+                />
+              </label>
+            </div>
+          </section>
+          <section className="school-recess-session" aria-labelledby="night-recess-title">
+            <h3 id="night-recess-title">Sessão da noite</h3>
+            <label className="school-recess-toggle">
+              <input
+                checked={nightEnabled}
+                onChange={(event) => setNightEnabled(event.target.checked)}
+                type="checkbox"
+              />
+              <span>Configurar recreio da noite</span>
+            </label>
+            <div className="school-recess-times">
+              <label>
+                Início do recreio
+                <input
+                  disabled={!nightEnabled}
+                  onChange={(event) => setNightStartsAt(event.target.value)}
+                  required={nightEnabled}
+                  type="time"
+                  value={nightStartsAt}
+                />
+              </label>
+              <label>
+                Fim do recreio
+                <input
+                  disabled={!nightEnabled}
+                  onChange={(event) => setNightEndsAt(event.target.value)}
+                  required={nightEnabled}
+                  type="time"
+                  value={nightEndsAt}
                 />
               </label>
             </div>

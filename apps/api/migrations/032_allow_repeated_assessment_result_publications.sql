@@ -1,0 +1,2 @@
+ALTER TABLE assessment_webhook_outbox
+  DROP CONSTRAINT assessment_webhook_outbox_school_id_assessment_id_student_i_key;

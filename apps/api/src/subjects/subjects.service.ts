@@ -224,47 +224,51 @@ export class SubjectsService {
         );
         const requestedGradeIds = gradeFrequencies.map((assignment) => assignment.gradeId);
         const removedAssignments = await client.query<{
-          grade: string;
-          schedule_used: boolean;
-          assessment_used: boolean;
+          grade_id: string;
         }>(
-          `SELECT grades.name AS grade,
-                  EXISTS (
-                    SELECT 1
-                    FROM classes
-                    JOIN class_schedules
-                      ON class_schedules.school_id = classes.school_id
-                     AND class_schedules.class_id = classes.id
-                    WHERE classes.school_id = school_subject_grades.school_id
-                      AND classes.grade_id = school_subject_grades.grade_id
-                      AND class_schedules.subject_id = school_subject_grades.subject_id
-                  ) AS schedule_used,
-                  EXISTS (
-                    SELECT 1
-                    FROM classes
-                    JOIN assessments
-                      ON assessments.school_id = classes.school_id
-                     AND assessments.class_id = classes.id
-                    WHERE classes.school_id = school_subject_grades.school_id
-                      AND classes.grade_id = school_subject_grades.grade_id
-                      AND assessments.subject_id = school_subject_grades.subject_id
-                  ) AS assessment_used
+          `SELECT school_subject_grades.grade_id
            FROM school_subject_grades
-           JOIN grades
-             ON grades.school_id = school_subject_grades.school_id
-            AND grades.id = school_subject_grades.grade_id
            WHERE school_subject_grades.school_id = $1
              AND school_subject_grades.subject_id = $2
-             AND NOT (school_subject_grades.grade_id = ANY($3::uuid[]))`,
+             AND NOT (school_subject_grades.grade_id = ANY($3::uuid[]))
+           FOR UPDATE OF school_subject_grades`,
           [schoolId, subjectId, requestedGradeIds],
         );
-        const usedAssignment = removedAssignments.rows.find(
-          (assignment) => assignment.schedule_used || assignment.assessment_used,
-        );
-        if (usedAssignment) {
-          throw new ConflictException(
-            `Não é possível remover a matéria do ano escolar ${usedAssignment.grade} porque ela já está vinculada a horários ou avaliações.`,
+        const removedGradeIds = removedAssignments.rows.map((assignment) => assignment.grade_id);
+        if (removedGradeIds.length > 0) {
+          const removedSchedules = await client.query<{
+            id: string;
+            class_id: string;
+            day_of_week: number;
+          }>(
+            `DELETE FROM class_schedules
+             WHERE class_schedules.school_id = $1
+               AND class_schedules.subject_id = $2
+               AND class_schedules.class_id IN (
+                 SELECT classes.id
+                 FROM classes
+                 WHERE classes.school_id = $1
+                   AND classes.grade_id = ANY($3::uuid[])
+               )
+             RETURNING id, class_id, day_of_week`,
+            [schoolId, subjectId, removedGradeIds],
           );
+          for (const schedule of removedSchedules.rows) {
+            await client.query(
+              `INSERT INTO audit_logs (school_id, actor_id, action, entity_type, entity_id, details)
+               VALUES ($1, $2, 'schedule.deleted', 'class_schedule', $3, $4::jsonb)`,
+              [
+                schoolId,
+                updatedBy,
+                schedule.id,
+                JSON.stringify({
+                  classId: schedule.class_id,
+                  dayOfWeek: schedule.day_of_week,
+                  subjectId,
+                }),
+              ],
+            );
+          }
         }
 
         const updated = await client.query<{ id: string; name: string }>(

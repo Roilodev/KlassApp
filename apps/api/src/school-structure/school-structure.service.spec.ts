@@ -22,6 +22,19 @@ describe('SchoolStructureService', () => {
     return { service, query, transaction };
   }
 
+  it('lists school grades in name order', async () => {
+    const { service, query } = makeService(async () => ({
+      rows: [{ name: '1º ano' }, { name: '4º ano' }],
+      rowCount: 2,
+    }));
+
+    await expect(service.listGrades('school-id')).resolves.toEqual(['1º ano', '4º ano']);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('FROM grades'),
+      ['school-id'],
+    );
+  });
+
   it('lists active students and assigned active teachers grouped by class', async () => {
     const roster = {
       classId,
@@ -67,11 +80,11 @@ describe('SchoolStructureService', () => {
 
     await expect(service.createClass('school-id', {
       ...validInput,
-      session: 'afternoon',
+      session: 'night',
     })).resolves.toMatchObject({ id: classId, session: 'morning' });
     expect(query).toHaveBeenCalledWith(
       expect.stringContaining('DO UPDATE SET name = EXCLUDED.name'),
-      ['school-id', 2026, '4º ano', 'A', 'afternoon'],
+      ['school-id', 2026, '4º ano', 'A', 'night'],
     );
     expect(query.mock.calls[0]?.[0]).not.toContain('session = EXCLUDED.session');
   });
@@ -82,7 +95,7 @@ describe('SchoolStructureService', () => {
     await expect(
       service.updateClass('school-id', 'admin-id', classId, {
         ...validInput,
-        session: 'night' as 'morning',
+        session: 'evening' as 'morning',
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(transaction).not.toHaveBeenCalled();
@@ -182,7 +195,7 @@ describe('SchoolStructureService', () => {
     );
   });
 
-  it('moves class schedules by turn order when changing the class session', async () => {
+  it('moves class schedules to the night session by turn order', async () => {
     const queryHandler = vi.fn(async (sql: string) => {
       if (sql.includes('SELECT classes.id')) {
         return {
@@ -194,7 +207,7 @@ describe('SchoolStructureService', () => {
         return {
           rows: [
             { session: 'morning', starts_at: '08:00:00', ends_at: '08:50:00', period_order: 1 },
-            { session: 'afternoon', starts_at: '13:00:00', ends_at: '13:50:00', period_order: 1 },
+            { session: 'night', starts_at: '19:00:00', ends_at: '19:50:00', period_order: 1 },
           ],
           rowCount: 2,
         };
@@ -222,7 +235,7 @@ describe('SchoolStructureService', () => {
       }
       if (sql.includes('UPDATE classes')) {
         return {
-          rows: [{ id: classId, year: 2026, grade: '4º ano', name: 'A', session: 'afternoon' }],
+          rows: [{ id: classId, year: 2026, grade: '4º ano', name: 'A', session: 'night' }],
           rowCount: 1,
         };
       }
@@ -233,21 +246,25 @@ describe('SchoolStructureService', () => {
     await expect(
       service.updateClass('school-id', 'admin-id', classId, {
         ...validInput,
-        session: 'afternoon',
+        session: 'night',
       }),
     ).resolves.toMatchObject({
       id: classId,
-      session: 'afternoon',
+      session: 'night',
       rescheduledSchedules: [{
         id: '323e4567-e89b-42d3-a456-426614174000',
-        startsAt: '13:00',
-        endsAt: '13:50',
+        startsAt: '19:00',
+        endsAt: '19:50',
         teacherId: null,
       }],
     });
     expect(query).toHaveBeenCalledWith(
       expect.stringContaining('SET starts_at = $3::time, ends_at = $4::time'),
-      ['school-id', '323e4567-e89b-42d3-a456-426614174000', '13:00', '13:50', false],
+      ['school-id', '323e4567-e89b-42d3-a456-426614174000', '19:00', '19:50', false],
+    );
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('night_starts_at'),
+      ['school-id'],
     );
   });
 

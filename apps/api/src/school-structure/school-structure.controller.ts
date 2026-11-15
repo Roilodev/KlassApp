@@ -26,6 +26,11 @@ export class SchoolStructureController {
     return this.schoolStructure.listClasses(request.user.schoolId);
   }
 
+  @Get('grades')
+  listGrades(@Req() request: AuthenticatedRequest) {
+    return this.schoolStructure.listGrades(request.user.schoolId);
+  }
+
   @Get('classes/rosters')
   listClassRosters(@Req() request: AuthenticatedRequest) {
     return this.schoolStructure.listClassRosters(request.user.schoolId);

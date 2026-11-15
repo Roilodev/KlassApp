@@ -20,7 +20,7 @@ export interface SchoolClass {
   year: number;
   grade: string;
   name: string;
-  session?: "morning" | "afternoon";
+  session?: "morning" | "afternoon" | "night";
   students?: Array<{ id: string; fullName: string }>;
   teachers?: Array<{ id: string; fullName: string }>;
 }
@@ -33,7 +33,16 @@ export interface ClassSessionPeriod {
 export interface SchoolClassSessions {
   morning: ClassSessionPeriod[];
   afternoon: ClassSessionPeriod[];
+  night: ClassSessionPeriod[];
 }
+
+type SchoolClassSession = NonNullable<SchoolClass["session"]>;
+
+const sessionNames: Record<SchoolClassSession, string> = {
+  morning: "Manhã",
+  afternoon: "Tarde",
+  night: "Noite",
+};
 
 export interface ClassSchedule {
   id: string;
@@ -64,6 +73,7 @@ export interface ClassScheduleTeacher {
 
 interface ClassFormProps {
   initialClasses: SchoolClass[];
+  grades: string[];
   initialSchedules: ClassSchedule[];
   subjects: ClassSubject[];
   teachers: ClassScheduleTeacher[];
@@ -119,8 +129,10 @@ function normalizeScheduleTime(time: string) {
 function isClassScheduleComplete(
   classId: string,
   grade: string,
+  session: SchoolClassSession,
   schedules: ClassSchedule[],
   subjects: ClassSubject[],
+  classSessions: SchoolClassSessions,
 ) {
   const classSchedules = schedules.filter(
     (schedule) =>
@@ -132,7 +144,14 @@ function isClassScheduleComplete(
     const assignment = subject.gradeFrequencies.find((item) => item.grade === grade);
     return assignment ? [{ ...subject, weeklyFrequency: assignment.weeklyFrequency }] : [];
   });
+  const sessionCapacity = classSessions[session].length * weekdays.length;
+  const expectedLessons = gradeSubjects.reduce(
+    (total, subject) => total + (subject.weeklyFrequency ?? 0),
+    0,
+  );
   return gradeSubjects.length > 0 &&
+    sessionCapacity > 0 &&
+    expectedLessons === sessionCapacity &&
     gradeSubjects.every((subject) =>
       subject.weeklyFrequency !== null &&
       classSchedules.filter((schedule) => schedule.subjectId === subject.id).length === subject.weeklyFrequency,
@@ -155,6 +174,7 @@ function isDeletedScheduleSlot(
 
 export function ClassForm({
   initialClasses,
+  grades,
   initialSchedules,
   subjects,
   teachers,
@@ -167,7 +187,7 @@ export function ClassForm({
   const [year, setYear] = useState(String(new Date().getFullYear()));
   const [grade, setGrade] = useState("");
   const [name, setName] = useState("");
-  const [session, setSession] = useState<"morning" | "afternoon">("morning");
+  const [session, setSession] = useState<SchoolClassSession>("morning");
   const [error, setError] = useState("");
   const [scheduleError, setScheduleError] = useState("");
   const [success, setSuccess] = useState("");
@@ -221,7 +241,14 @@ export function ClassForm({
     return { id: subject.id, name: subject.name, difference };
   }).filter((subject) => subject.difference === null || subject.difference !== 0);
   const scheduleMatchesAllFrequencies = scheduleClass
-    ? isClassScheduleComplete(scheduleClass.id, scheduleClass.grade, schedules, subjects)
+    ? isClassScheduleComplete(
+        scheduleClass.id,
+        scheduleClass.grade,
+        scheduleClass.session ?? "morning",
+        schedules,
+        subjects,
+        classSessions,
+      )
     : false;
   const selectedSubjectForNewLesson = gradeSubjects.find((subject) => subject.id === addSubjectId);
   const projectedLessonCount = selectedSubjectForNewLesson
@@ -236,7 +263,9 @@ export function ClassForm({
     : [];
   const classRecess = scheduleClass?.session === "afternoon"
     ? { startsAt: recess.afternoonStartsAt, endsAt: recess.afternoonEndsAt }
-    : { startsAt: recess.startsAt, endsAt: recess.endsAt };
+    : scheduleClass?.session === "night"
+      ? { startsAt: recess.nightStartsAt, endsAt: recess.nightEndsAt }
+      : { startsAt: recess.startsAt, endsAt: recess.endsAt };
   const scheduleTimes = new Set(
     scheduleRows.map(
       (schedule) =>
@@ -312,7 +341,10 @@ export function ClassForm({
   if (classRecess.startsAt && classRecess.endsAt) {
     scheduleTimes.add(`${classRecess.startsAt}|${classRecess.endsAt}`);
   }
-  const schoolGrades = [...new Set(classes.map((schoolClass) => schoolClass.grade))].sort(
+  const schoolGrades = [...new Set([
+    ...grades,
+    ...classes.map((schoolClass) => schoolClass.grade),
+  ])].sort(
     (left, right) => left.localeCompare(right),
   );
 
@@ -669,7 +701,6 @@ export function ClassForm({
           });
         }
 
-        const sessionNames = { morning: "Manhã", afternoon: "Tarde" };
         const movementSummary = [...countsByPeriod.entries()]
           .sort(([left], [right]) => left - right)
           .map(([index, count]) => {
@@ -869,13 +900,18 @@ export function ClassForm({
             </label>
             <label>
               Ano escolar
-              <input
-                maxLength={80}
+              <select
                 onChange={(event) => setGrade(event.target.value)}
-                placeholder="Ex.: 4º ano"
                 required
                 value={grade}
-              />
+              >
+                <option value="">Selecione um ano escolar</option>
+                {schoolGrades.map((schoolGrade) => (
+                  <option key={schoolGrade} value={schoolGrade}>
+                    {schoolGrade}
+                  </option>
+                ))}
+              </select>
             </label>
             <label>
               Turma
@@ -890,11 +926,12 @@ export function ClassForm({
             <label>
               Sessão
               <select
-                onChange={(event) => setSession(event.target.value as "morning" | "afternoon")}
+                onChange={(event) => setSession(event.target.value as SchoolClassSession)}
                 value={session}
               >
                 <option value="morning">Manhã</option>
                 <option value="afternoon">Tarde</option>
+                <option value="night">Noite</option>
               </select>
             </label>
             <div className="class-form-actions">
@@ -917,7 +954,7 @@ export function ClassForm({
 
       {selectedClass && !editingClassId && (
         <EntryFormDialog
-          description={`Ano letivo ${selectedClass.year} · Sessão ${selectedClass.session === "afternoon" ? "Tarde" : "Manhã"}`}
+          description={`Ano letivo ${selectedClass.year} · Sessão ${sessionNames[selectedClass.session ?? "morning"]}`}
           eyebrow="DETALHES DA TURMA"
           icon="▦"
           isBusy={false}
@@ -1141,7 +1178,7 @@ export function ClassForm({
                 </ul>
               ) : scheduleMatchesAllFrequencies ? (
                 <p className="weekly-schedule-frequency-status" aria-live="polite">
-                  O horário corresponde às frequências semanais de todas as matérias.
+                  O horário corresponde às frequências semanais e à capacidade da sessão.
                 </p>
               ) : null}
               <button className="schedule-print-button" onClick={printWeeklySchedule} type="button">
@@ -1374,11 +1411,12 @@ export function ClassForm({
               Sessão
               <select
                 disabled={submitting}
-                onChange={(event) => setSession(event.target.value as "morning" | "afternoon")}
+                onChange={(event) => setSession(event.target.value as SchoolClassSession)}
                 value={session}
               >
                 <option value="morning">Manhã</option>
                 <option value="afternoon">Tarde</option>
+                <option value="night">Noite</option>
               </select>
             </label>
             <div className="class-form-actions">
@@ -1435,8 +1473,10 @@ export function ClassForm({
                 const scheduleComplete = isClassScheduleComplete(
                   schoolClass.id,
                   schoolClass.grade,
+                  schoolClass.session ?? "morning",
                   schedules,
                   subjects,
+                  classSessions,
                 );
                 return (
                   <li
@@ -1448,18 +1488,25 @@ export function ClassForm({
                     }}
                   >
                     <button
-                      aria-label={`Ver detalhes da turma ${schoolClass.name}, ${schoolClass.grade}, ${schoolClass.year}, sessão ${schoolClass.session === "afternoon" ? "Tarde" : "Manhã"}, horário ${scheduleComplete ? "completo" : "por revisar"}`}
+                      aria-label={`Ver detalhes da turma ${schoolClass.name}, ${schoolClass.grade}, ${schoolClass.year}, sessão ${sessionNames[schoolClass.session ?? "morning"]}, horário ${scheduleComplete ? "completo" : "por revisar"}`}
                       className="class-card-button"
                       onClick={() => openClassDetails(schoolClass)}
                       type="button"
                     >
                       <span
-                        className={`class-session-indicator ${schoolClass.session === "afternoon" ? "class-session-indicator-afternoon" : ""}`}
+                        className={`class-session-indicator${schoolClass.session ? ` class-session-indicator-${schoolClass.session}` : ""}`}
                         aria-hidden="true"
                       >
-                        {schoolClass.session === "afternoon" ? (
+                        {schoolClass.session !== "morning" ? (
                           <svg viewBox="0 0 24 24" fill="none">
-                            <path d="M20.2 15.1A8.5 8.5 0 0 1 8.9 3.8 8.5 8.5 0 1 0 20.2 15.1Z" />
+                            {schoolClass.session === "night" ? (
+                              <>
+                                <path d="M19.2 15.1A8 8 0 0 1 8.9 4.8 8.5 8.5 0 1 0 19.2 15.1Z" />
+                                <path d="m18.5 3 .6 1.5 1.5.5-1.5.6-.6 1.5-.5-1.5-1.5-.6 1.5-.5.5-1.5Zm-5 5 .4 1 1 .4-1 .4-.4 1-.4-1-1-.4 1-.4.4-1Z" />
+                              </>
+                            ) : (
+                              <path d="M20.2 15.1A8.5 8.5 0 0 1 8.9 3.8 8.5 8.5 0 1 0 20.2 15.1Z" />
+                            )}
                           </svg>
                         ) : (
                           <svg viewBox="0 0 24 24" fill="none">
@@ -1472,9 +1519,9 @@ export function ClassForm({
                             <rect x="3.5" y="5.5" width="17" height="15" rx="2" />
                             <path d="M7.5 3.5v4m9-4v4m-13 3h17" />
                           </svg>
-                          <span className={scheduleComplete ? "schedule-status-dot" : "schedule-status-cross"}>
-                            {scheduleComplete ? "" : "×"}
-                          </span>
+                          <span
+                            className={`schedule-status-dot${scheduleComplete ? "" : " schedule-status-dot-incomplete"}`}
+                          />
                         </span>
                       </span>
                       <span
@@ -1491,7 +1538,7 @@ export function ClassForm({
                         <strong>Turma {schoolClass.name}</strong>
                         <small>
                           {schoolClass.grade} · Ano letivo {schoolClass.year} · Sessão{" "}
-                          {schoolClass.session === "afternoon" ? "Tarde" : "Manhã"}
+                          {sessionNames[schoolClass.session ?? "morning"]}
                         </small>
                       </span>
                       <span className="class-list-tag">

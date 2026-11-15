@@ -194,7 +194,14 @@ export class SchedulesService {
       }
 
       await this.assertConfiguredSessionPeriod(client, schoolId, classId, startsAt, endsAt);
-      await this.assertOutsideSchoolRecess(client, schoolId, dayOfWeek, startsAt, endsAt);
+      await this.assertOutsideSchoolRecess(
+        client,
+        schoolId,
+        classId,
+        dayOfWeek,
+        startsAt,
+        endsAt,
+      );
       const overlapping = await client.query<{
         class_conflict: boolean;
         teacher_conflict: boolean;
@@ -321,7 +328,14 @@ export class SchedulesService {
       }
 
       await this.assertConfiguredSessionPeriod(client, schoolId, classId, startsAt, endsAt);
-      await this.assertOutsideSchoolRecess(client, schoolId, dayOfWeek, startsAt, endsAt);
+      await this.assertOutsideSchoolRecess(
+        client,
+        schoolId,
+        classId,
+        dayOfWeek,
+        startsAt,
+        endsAt,
+      );
       const overlapping = await client.query<{
         class_conflict: boolean;
         teacher_conflict: boolean;
@@ -483,6 +497,7 @@ export class SchedulesService {
   private async assertOutsideSchoolRecess(
     client: PoolClient,
     schoolId: string,
+    classId: string,
     dayOfWeek: number,
     startsAt: string,
     endsAt: string,
@@ -494,16 +509,21 @@ export class SchedulesService {
       `SELECT recess.starts_at::text AS starts_at,
               recess.ends_at::text AS ends_at
        FROM school_recesses AS school_recess
+       JOIN classes
+         ON classes.school_id = school_recess.school_id
+        AND classes.id = $2
        CROSS JOIN LATERAL (
          VALUES
-           (school_recess.starts_at, school_recess.ends_at),
-           (school_recess.afternoon_starts_at, school_recess.afternoon_ends_at)
-       ) AS recess(starts_at, ends_at)
+           ('morning', school_recess.starts_at, school_recess.ends_at),
+           ('afternoon', school_recess.afternoon_starts_at, school_recess.afternoon_ends_at),
+           ('night', school_recess.night_starts_at, school_recess.night_ends_at)
+       ) AS recess(session, starts_at, ends_at)
        WHERE school_recess.school_id = $1
+         AND recess.session = classes.session
          AND recess.starts_at IS NOT NULL
-         AND recess.starts_at < $3::time
-         AND recess.ends_at > $2::time`,
-      [schoolId, startsAt, endsAt],
+         AND recess.starts_at < $4::time
+         AND recess.ends_at > $3::time`,
+      [schoolId, classId, startsAt, endsAt],
     );
     if (result.rowCount) {
       throw new ConflictException('Este horário se sobrepõe ao recreio escolar.');

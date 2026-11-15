@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service.js';
+import type { SchoolClassSession } from '../settings/settings.service.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -14,7 +15,7 @@ export interface SchoolClass {
   year: number;
   grade: string;
   name: string;
-  session?: 'morning' | 'afternoon';
+  session?: SchoolClassSession;
   students?: Array<{ id: string; fullName: string }>;
 }
 
@@ -37,7 +38,7 @@ export interface SessionTeacherConflict {
 }
 
 interface ClassSessionPeriodRow {
-  session: 'morning' | 'afternoon';
+  session: SchoolClassSession;
   starts_at: string;
   ends_at: string;
   period_order: number;
@@ -62,7 +63,7 @@ export interface CreateSchoolClassInput {
   year: number;
   grade: string;
   name: string;
-  session?: 'morning' | 'afternoon';
+  session?: SchoolClassSession;
   allowTeacherConflictsWithoutTeacher?: boolean;
   confirmedTeacherConflictScheduleIds?: string[];
 }
@@ -85,7 +86,12 @@ function validateClassInput(input: CreateSchoolClassInput) {
   if (!Number.isInteger(input.year) || input.year < 2000 || input.year > 2200) {
     throw new BadRequestException('Informe um ano letivo válido.');
   }
-  if (session !== undefined && session !== 'morning' && session !== 'afternoon') {
+  if (
+    session !== undefined &&
+    session !== 'morning' &&
+    session !== 'afternoon' &&
+    session !== 'night'
+  ) {
     throw new BadRequestException('Informe uma sessão válida para a turma.');
   }
   if (grade.length < 1 || grade.length > 80) {
@@ -107,7 +113,7 @@ export class SchoolStructureService {
       year: number;
       grade: string;
       name: string;
-      session: 'morning' | 'afternoon';
+      session: SchoolClassSession;
     }>(
       `SELECT classes.id, academic_years.year, grades.name AS grade, classes.name, classes.session
        FROM classes
@@ -122,6 +128,17 @@ export class SchoolStructureService {
       [schoolId],
     );
     return result.rows;
+  }
+
+  async listGrades(schoolId: string): Promise<string[]> {
+    const result = await this.database.query<{ name: string }>(
+      `SELECT name
+       FROM grades
+       WHERE school_id = $1
+       ORDER BY name`,
+      [schoolId],
+    );
+    return result.rows.map((grade) => grade.name);
   }
 
   async listClassRosters(schoolId: string): Promise<SchoolClassRoster[]> {
@@ -178,7 +195,7 @@ export class SchoolStructureService {
       year: number;
       grade: string;
       name: string;
-      session: 'morning' | 'afternoon';
+      session: SchoolClassSession;
     }>(
       `WITH school_year AS (
          INSERT INTO academic_years (school_id, year)
@@ -372,8 +389,8 @@ export class SchoolStructureService {
     client: PoolClient,
     schoolId: string,
     classId: string,
-    sourceSession: 'morning' | 'afternoon',
-    targetSession: 'morning' | 'afternoon',
+    sourceSession: SchoolClassSession,
+    targetSession: SchoolClassSession,
     allowTeacherConflictsWithoutTeacher: boolean,
     confirmedTeacherConflictScheduleIds: string[],
   ): Promise<SessionScheduleChange[]> {
@@ -427,8 +444,20 @@ export class SchoolStructureService {
       starts_at: string | null;
       ends_at: string | null;
     }>(
-      `SELECT ${targetSession === 'morning' ? 'starts_at' : 'afternoon_starts_at'}::text AS starts_at,
-              ${targetSession === 'morning' ? 'ends_at' : 'afternoon_ends_at'}::text AS ends_at
+      `SELECT ${
+        targetSession === 'morning'
+          ? 'starts_at'
+          : targetSession === 'afternoon'
+            ? 'afternoon_starts_at'
+            : 'night_starts_at'
+      }::text AS starts_at,
+              ${
+        targetSession === 'morning'
+          ? 'ends_at'
+          : targetSession === 'afternoon'
+            ? 'afternoon_ends_at'
+            : 'night_ends_at'
+      }::text AS ends_at
        FROM school_recesses
        WHERE school_id = $1`,
       [schoolId],

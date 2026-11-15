@@ -13,6 +13,14 @@ describe('DashboardService', () => {
         active_teachers: 5,
         required_teachers: 2,
         configured_subject_frequencies: 7,
+        required_subject_lessons: 48,
+        scheduled_subject_lessons: 46,
+        covered_subject_lessons: 42,
+        unconfigured_subject_frequencies: 0,
+        unassigned_subject_periods: 8,
+        excess_subject_periods: 2,
+        classes_without_subject_frequencies: 1,
+        classes_without_configured_session_periods: 0,
         schedules: 20,
         classes_with_incomplete_schedules: 0,
         events: 3,
@@ -23,6 +31,7 @@ describe('DashboardService', () => {
         configured_events: 4,
         morning_session_periods: 3,
         afternoon_session_periods: 2,
+        night_session_periods: 2,
         configured_students: 14,
       }],
       rowCount: 1,
@@ -37,6 +46,14 @@ describe('DashboardService', () => {
       activeTeachers: 5,
       requiredTeachers: 2,
       configuredSubjectFrequencies: 7,
+      requiredSubjectLessons: 48,
+      scheduledSubjectLessons: 46,
+      coveredSubjectLessons: 42,
+      unconfiguredSubjectFrequencies: 0,
+      unassignedSubjectPeriods: 8,
+      excessSubjectPeriods: 2,
+      classesWithoutSubjectFrequencies: 1,
+      classesWithoutConfiguredSessionPeriods: 0,
       schedules: 20,
       classesWithIncompleteSchedules: 0,
       events: 3,
@@ -47,6 +64,7 @@ describe('DashboardService', () => {
       configuredEvents: 4,
       morningSessionPeriods: 3,
       afternoonSessionPeriods: 2,
+      nightSessionPeriods: 2,
       configuredStudents: 14,
     });
     expect(query).toHaveBeenCalledWith(
@@ -58,7 +76,23 @@ describe('DashboardService', () => {
       ['school-id', 'admin-id', 'admin'],
     );
     expect(query).toHaveBeenCalledWith(
-      expect.stringContaining('school_subject_grades.weekly_frequency * class_count.total'),
+      expect.stringContaining('SUM(weekly_frequency)'),
+      ['school-id', 'admin-id', 'admin'],
+    );
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('count(class_schedules.id) FILTER'),
+      ['school-id', 'admin-id', 'admin'],
+    );
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('LEAST(weekly_frequency, covered_lessons)'),
+      ['school-id', 'admin-id', 'admin'],
+    );
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('SUM(GREATEST(weekly_periods - planned_lessons, 0))'),
+      ['school-id', 'admin-id', 'admin'],
+    );
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('ceil(demand.weekly_lessons::numeric / capacity.max_weekly_periods)'),
       ['school-id', 'admin-id', 'admin'],
     );
     expect(query.mock.calls[0]?.[0]).not.toContain('school_subjects.weekly_frequency');
@@ -78,6 +112,14 @@ describe('DashboardService', () => {
         active_teachers: null,
         required_teachers: null,
         configured_subject_frequencies: null,
+        required_subject_lessons: null,
+        scheduled_subject_lessons: null,
+        covered_subject_lessons: null,
+        unconfigured_subject_frequencies: null,
+        unassigned_subject_periods: null,
+        excess_subject_periods: null,
+        classes_without_subject_frequencies: null,
+        classes_without_configured_session_periods: null,
         schedules: 7,
         classes_with_incomplete_schedules: null,
         events: null,
@@ -88,6 +130,7 @@ describe('DashboardService', () => {
         configured_events: null,
         morning_session_periods: null,
         afternoon_session_periods: null,
+        night_session_periods: null,
         configured_students: null,
       }],
       rowCount: 1,
@@ -102,6 +145,14 @@ describe('DashboardService', () => {
       activeTeachers: null,
       requiredTeachers: null,
       configuredSubjectFrequencies: null,
+      requiredSubjectLessons: null,
+      scheduledSubjectLessons: null,
+      coveredSubjectLessons: null,
+      unconfiguredSubjectFrequencies: null,
+      unassignedSubjectPeriods: null,
+      excessSubjectPeriods: null,
+      classesWithoutSubjectFrequencies: null,
+      classesWithoutConfiguredSessionPeriods: null,
       schedules: 7,
       classesWithIncompleteSchedules: null,
       events: null,
@@ -112,6 +163,7 @@ describe('DashboardService', () => {
       configuredEvents: null,
       morningSessionPeriods: null,
       afternoonSessionPeriods: null,
+      nightSessionPeriods: null,
       configuredStudents: null,
     });
     expect(query).toHaveBeenCalledWith(
@@ -129,8 +181,14 @@ describe('DashboardService', () => {
         { type: 'subjects-without-teachers', item: 'Ciências' },
         { type: 'subjects-without-teachers', item: 'História' },
         { type: 'students-without-responsible', item: 'Estudante de teste' },
+        { type: 'classes-with-unassigned-subject-periods', item: '4º ano · Turma A (2026) — 1 períodos sem matéria' },
+        { type: 'classes-with-excess-subject-periods', item: '5º ano · Turma C (2026) — 2 períodos acima da capacidade' },
+        { type: 'classes-with-unconfigured-subject-frequencies', item: '3º ano · Turma B (2026)' },
+        { type: 'classes-without-session-periods', item: '6º ano · Turma D (2026)' },
+        { type: 'subject-lessons-without-schedules', item: '4º ano · Turma A (2026) · História — 1 aula sem horário' },
+        { type: 'subject-lessons-without-teachers', item: '4º ano · Turma A (2026) · Ensino Religioso — 1 aula sem professor' },
       ],
-      rowCount: 6,
+      rowCount: 12,
     }));
     const service = new DashboardService({ query } as unknown as DatabaseService);
 
@@ -150,7 +208,7 @@ describe('DashboardService', () => {
       {
         type: 'classes-without-schedules',
         title: 'Turmas sem horário definido',
-        href: '/horarios',
+        href: '/turmas',
         items: ['4º ano · Turma A (2026)'],
       },
       {
@@ -158,6 +216,42 @@ describe('DashboardService', () => {
         title: 'Turmas sem professor',
         href: '/professores',
         items: ['5º ano · Turma C (2026)'],
+      },
+      {
+        type: 'classes-with-unassigned-subject-periods',
+        title: 'Espaços semanais sem matéria',
+        href: '/materias',
+        items: ['4º ano · Turma A (2026) — 1 períodos sem matéria'],
+      },
+      {
+        type: 'classes-with-excess-subject-periods',
+        title: 'Frequências acima dos períodos',
+        href: '/materias',
+        items: ['5º ano · Turma C (2026) — 2 períodos acima da capacidade'],
+      },
+      {
+        type: 'classes-with-unconfigured-subject-frequencies',
+        title: 'Turmas com frequências pendentes',
+        href: '/materias',
+        items: ['3º ano · Turma B (2026)'],
+      },
+      {
+        type: 'classes-without-session-periods',
+        title: 'Turmas sem períodos configurados',
+        href: '/configuracao',
+        items: ['6º ano · Turma D (2026)'],
+      },
+      {
+        type: 'subject-lessons-without-schedules',
+        title: 'Aulas de matérias sem horário',
+        href: '/turmas',
+        items: ['4º ano · Turma A (2026) · História — 1 aula sem horário'],
+      },
+      {
+        type: 'subject-lessons-without-teachers',
+        title: 'Aulas sem professor atribuído',
+        href: '/turmas',
+        items: ['4º ano · Turma A (2026) · Ensino Religioso — 1 aula sem professor'],
       },
       {
         type: 'students-without-responsible',

@@ -3,4 +3,6 @@ export interface SchoolRecess {
   endsAt: string | null;
   afternoonStartsAt: string | null;
   afternoonEndsAt: string | null;
+  nightStartsAt: string | null;
+  nightEndsAt: string | null;
 }

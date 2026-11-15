@@ -2,6 +2,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import { DatabaseService } from '../database/database.service.js';
+import type { AssessmentWebhook } from './assessment-webhook.service.js';
 import { AssessmentsService } from './assessments.service.js';
 
 const classId = '123e4567-e89b-42d3-a456-426614174000';
@@ -28,10 +29,15 @@ function makeService(
     (work: (client: PoolClient) => Promise<unknown>) =>
       work({ query } as unknown as PoolClient),
   );
+  const webhook = {
+    enqueueAssessmentResult: vi.fn<AssessmentWebhook['enqueueAssessmentResult']>().mockResolvedValue(undefined),
+    wake: vi.fn(),
+  } satisfies AssessmentWebhook;
   const service = new AssessmentsService(
     { query, transaction } as unknown as DatabaseService,
+    webhook,
   );
-  return { service, query, transaction };
+  return { service, query, transaction, webhook };
 }
 
 function assessmentRow() {
@@ -47,6 +53,32 @@ function assessmentRow() {
     scheduled_on: validInput.scheduledOn,
     max_points: '10.00',
   };
+}
+
+function recordResultQueryHandler(whatsappAuthorized = true) {
+  return vi.fn(async (sql: string) => {
+    if (sql.includes('SELECT id FROM assessments')) {
+      return { rows: [{ id: assessmentId }], rowCount: 1 };
+    }
+    if (sql.includes('SELECT assessments.id')) {
+      return { rows: [assessmentRow()], rowCount: 1 };
+    }
+    if (sql.includes('FROM student_enrollments')) {
+      return { rows: [{ enrollment_id: 'd0b80123-e89b-42d3-a456-426614174000' }], rowCount: 1 };
+    }
+    if (sql.includes('FROM assessment_results')) {
+      return {
+        rows: [{
+          full_name: 'Estudante de teste',
+          score: '8.50',
+          updated_at: new Date('2026-11-15T12:00:00.000Z'),
+          whatsapp_authorized: whatsappAuthorized,
+        }],
+        rowCount: 1,
+      };
+    }
+    return { rows: [], rowCount: 1 };
+  });
 }
 
 describe('AssessmentsService', () => {
@@ -85,7 +117,7 @@ describe('AssessmentsService', () => {
       }
       return { rows: [], rowCount: 1 };
     });
-    const { service, query, transaction } = makeService(queryHandler);
+    const { service, query, transaction, webhook } = makeService(queryHandler);
 
     await expect(
       service.create('school-id', 'user-id', 'teacher', validInput),
@@ -103,6 +135,8 @@ describe('AssessmentsService', () => {
       expect.stringContaining('teacher_class_assignments'),
       expect.arrayContaining(['teacher']),
     );
+    expect(webhook.enqueueAssessmentResult).not.toHaveBeenCalled();
+    expect(webhook.wake).not.toHaveBeenCalled();
   });
 
   it('does not let a teacher create an assessment for an unassigned class', async () => {
@@ -250,6 +284,7 @@ describe('AssessmentsService', () => {
           full_name: 'Estudante de teste',
           score: null,
           updated_at: null,
+          whatsapp_authorized: true,
         }],
         rowCount: 1,
       };
@@ -263,6 +298,7 @@ describe('AssessmentsService', () => {
       fullName: 'Estudante de teste',
       score: null,
       updatedAt: null,
+      whatsappAuthorized: true,
     }]);
     expect(query).toHaveBeenCalledWith(
       expect.stringContaining('student_enrollments.started_at <= assessments.scheduled_on'),
@@ -273,35 +309,17 @@ describe('AssessmentsService', () => {
       ['school-id', assessmentId],
     );
     expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('assessment_results.assessment_id IS NOT NULL'),
+      ['school-id', assessmentId],
+    );
+    expect(query).toHaveBeenCalledWith(
       expect.stringContaining('teacher_class_assignments'),
       expect.arrayContaining(['teacher']),
     );
   });
 
-  it('records a result only when it is within the assessment score range', async () => {
-    const queryHandler = vi.fn(async (sql: string) => {
-      if (sql.includes('SELECT id FROM assessments')) {
-        return { rows: [{ id: assessmentId }], rowCount: 1 };
-      }
-      if (sql.includes('SELECT assessments.id')) {
-        return { rows: [assessmentRow()], rowCount: 1 };
-      }
-      if (sql.includes('FROM student_enrollments')) {
-        return { rows: [{ enrollment_id: 'd0b80123-e89b-42d3-a456-426614174000' }], rowCount: 1 };
-      }
-      if (sql.includes('FROM assessment_results')) {
-        return {
-          rows: [{
-            full_name: 'Estudante de teste',
-            score: '8.50',
-            updated_at: new Date('2026-11-15T12:00:00.000Z'),
-          }],
-          rowCount: 1,
-        };
-      }
-      return { rows: [], rowCount: 1 };
-    });
-    const { service, query, transaction } = makeService(queryHandler);
+  it('queues a webhook every time an authorized student result is saved', async () => {
+    const { service, query, transaction, webhook } = makeService(recordResultQueryHandler());
 
     await expect(
       service.recordResult(
@@ -315,6 +333,7 @@ describe('AssessmentsService', () => {
       studentId,
       fullName: 'Estudante de teste',
       score: 8.5,
+      whatsappAuthorized: true,
     });
     expect(transaction).toHaveBeenCalledOnce();
     expect(query).toHaveBeenCalledWith(
@@ -325,6 +344,44 @@ describe('AssessmentsService', () => {
       expect.stringContaining("'assessment.result_recorded'"),
       expect.anything(),
     );
+    await service.recordResult(
+      'school-id',
+      'teacher-id',
+      'teacher',
+      assessmentId,
+      { studentId, score: 8.5 },
+    );
+
+    expect(webhook.enqueueAssessmentResult).toHaveBeenCalledTimes(2);
+    expect(webhook.enqueueAssessmentResult).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      'school-id',
+      expect.objectContaining({ id: assessmentId }),
+      expect.objectContaining({ studentId, score: 8.5 }),
+    );
+    expect(webhook.wake).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not queue a webhook when no responsible has notification authorization', async () => {
+    const { service, webhook } = makeService(recordResultQueryHandler(false));
+
+    await expect(
+      service.recordResult(
+        'school-id',
+        'teacher-id',
+        'teacher',
+        assessmentId,
+        { studentId, score: 8.5 },
+      ),
+    ).resolves.toMatchObject({
+      studentId,
+      score: 8.5,
+      whatsappAuthorized: false,
+    });
+
+    expect(webhook.enqueueAssessmentResult).not.toHaveBeenCalled();
+    expect(webhook.wake).not.toHaveBeenCalled();
   });
 
   it('rejects scores above the maximum before writing a result', async () => {

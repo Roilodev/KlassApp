@@ -1,11 +1,16 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import type { PoolClient, QueryResult, QueryResultRow } from 'pg';
 import type { SchoolRole } from '../auth/roles.decorator.js';
 import { DatabaseService } from '../database/database.service.js';
+import {
+  AssessmentWebhookService,
+  type AssessmentWebhook,
+} from './assessment-webhook.service.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -54,6 +59,7 @@ export interface AssessmentStudentResult {
   fullName: string;
   score: number | null;
   updatedAt: string | null;
+  whatsappAuthorized: boolean;
 }
 
 interface AssessmentRow {
@@ -157,7 +163,11 @@ function validateAssessmentDetails(input: UpdateAssessmentInput) {
 
 @Injectable()
 export class AssessmentsService {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    @Inject(AssessmentWebhookService)
+    private readonly assessmentWebhook: AssessmentWebhook,
+  ) {}
 
   async listClasses(
     schoolId: string,
@@ -220,7 +230,7 @@ export class AssessmentsService {
       throw new BadRequestException('Selecione uma turma válida.');
     }
 
-    return this.database.transaction(async (client) => {
+    const assessment = await this.database.transaction(async (client) => {
       const schoolClass = await this.getClass(client, schoolId, createdBy, role, input.classId);
       if (!schoolClass) {
         throw new NotFoundException('A turma não foi encontrada ou não está atribuída a você.');
@@ -270,8 +280,16 @@ export class AssessmentsService {
           }),
         ],
       );
-      return this.getAssessment(client, schoolId, createdBy, role, assessmentId);
+      const assessment = await this.getAssessment(
+        client,
+        schoolId,
+        createdBy,
+        role,
+        assessmentId,
+      );
+      return assessment;
     });
+    return assessment;
   }
 
   async update(
@@ -381,10 +399,18 @@ export class AssessmentsService {
       full_name: string;
       score: string | null;
       updated_at: Date | null;
+      whatsapp_authorized: boolean;
     }>(
       `SELECT students.id AS student_id, students.full_name,
               assessment_results.score::text AS score,
-              assessment_results.updated_at
+              assessment_results.updated_at,
+              EXISTS (
+                SELECT 1
+                FROM student_responsibles
+                WHERE student_responsibles.school_id = students.school_id
+                  AND student_responsibles.student_id = students.id
+                  AND student_responsibles.notification_authorized = true
+              ) AS whatsapp_authorized
        FROM assessments
        JOIN student_enrollments
          ON student_enrollments.school_id = assessments.school_id
@@ -412,7 +438,7 @@ export class AssessmentsService {
          AND (
            students.is_active = true
            OR assessments.scheduled_on <= students.leave_date
-           OR assessment_results.id IS NOT NULL
+           OR assessment_results.assessment_id IS NOT NULL
          )
        ORDER BY students.full_name, students.id`,
       [schoolId, assessment.id],
@@ -422,6 +448,7 @@ export class AssessmentsService {
       fullName: row.full_name,
       score: row.score === null ? null : Number(row.score),
       updatedAt: row.updated_at?.toISOString() ?? null,
+      whatsappAuthorized: row.whatsapp_authorized,
     }));
   }
 
@@ -451,7 +478,7 @@ export class AssessmentsService {
       throw new BadRequestException('Informe uma pontuação válida com até duas casas decimais.');
     }
 
-    return this.database.transaction(async (client) => {
+    const savedResult = await this.database.transaction(async (client) => {
       const locked = await client.query(
         `SELECT id FROM assessments
          WHERE school_id = $1 AND id = $2
@@ -519,16 +546,27 @@ export class AssessmentsService {
           schoolId,
           recordedBy,
           input.studentId,
-          JSON.stringify({ assessmentId: assessment.id, score: input.score }),
+          JSON.stringify({
+            assessmentId: assessment.id,
+            score: input.score,
+          }),
         ],
       );
       const student = await client.query<{
         full_name: string;
         score: string;
         updated_at: Date;
+        whatsapp_authorized: boolean;
       }>(
         `SELECT students.full_name, assessment_results.score::text AS score,
-                assessment_results.updated_at
+                assessment_results.updated_at,
+                EXISTS (
+                  SELECT 1
+                  FROM student_responsibles
+                  WHERE student_responsibles.school_id = students.school_id
+                    AND student_responsibles.student_id = students.id
+                    AND student_responsibles.notification_authorized = true
+                ) AS whatsapp_authorized
          FROM assessment_results
          JOIN students
            ON students.school_id = assessment_results.school_id
@@ -542,13 +580,27 @@ export class AssessmentsService {
       if (!saved) {
         throw new Error('O resultado salvo não pôde ser carregado.');
       }
-      return {
+      const result = {
         studentId: input.studentId,
         fullName: saved.full_name,
         score: Number(saved.score),
         updatedAt: saved.updated_at.toISOString(),
+        whatsappAuthorized: saved.whatsapp_authorized,
       };
+      if (result.whatsappAuthorized) {
+        await this.assessmentWebhook.enqueueAssessmentResult(
+          client,
+          schoolId,
+          assessment,
+          result,
+        );
+      }
+      return result;
     });
+    if (savedResult.whatsappAuthorized) {
+      this.assessmentWebhook.wake();
+    }
+    return savedResult;
   }
 
   private async getAssessment(

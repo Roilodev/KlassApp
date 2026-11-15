@@ -130,6 +130,57 @@ describe('SubjectsService', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
+  it('removes schedules but preserves assessments when removing a grade frequency', async () => {
+    const remainingGradeId = 'e0a80123-e89b-42d3-a456-426614174000';
+    const { service, query } = makeService(async (sql) => {
+      if (sql.includes('SELECT id FROM school_subjects')) {
+        return { rows: [{ id: subjectId }], rowCount: 1 };
+      }
+      if (sql.includes('FROM grades')) {
+        return { rows: [{ id: remainingGradeId, name: '2º ano' }], rowCount: 1 };
+      }
+      if (sql.includes('SELECT school_subject_grades.grade_id')) {
+        return { rows: [{ grade_id: gradeId }], rowCount: 1 };
+      }
+      if (sql.includes('DELETE FROM class_schedules')) {
+        return {
+          rows: [{ id: 'schedule-id', class_id: 'class-id', day_of_week: 1 }],
+          rowCount: 1,
+        };
+      }
+      if (sql.includes('UPDATE school_subjects')) {
+        return { rows: [{ id: subjectId, name: 'Matemática' }], rowCount: 1 };
+      }
+      if (sql.includes('AS schedule_count')) {
+        return { rows: [{ schedule_count: 2, assessment_count: 1 }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 1 };
+    });
+
+    await expect(
+      service.update('school-id', 'user-id', subjectId, {
+        name: 'Matemática',
+        gradeFrequencies: [{ grade: '2º ano', weeklyFrequency: 4 }],
+      }),
+    ).resolves.toMatchObject({
+      gradeFrequencies: [{ grade: '2º ano', weeklyFrequency: 4 }],
+      scheduleCount: 2,
+      assessmentCount: 1,
+    });
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('DELETE FROM class_schedules'),
+      ['school-id', subjectId, [gradeId]],
+    );
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("'schedule.deleted'"),
+      expect.anything(),
+    );
+    expect(query).not.toHaveBeenCalledWith(
+      expect.stringContaining('DELETE FROM assessments'),
+      expect.anything(),
+    );
+  });
+
   it('prevents deleting subjects linked to schedules or assessments', async () => {
     const { service, query } = makeService(async (sql) => {
       if (sql.includes('SELECT name FROM school_subjects')) {

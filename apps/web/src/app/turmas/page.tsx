@@ -18,6 +18,7 @@ const apiUrl = process.env.API_INTERNAL_URL ?? "http://localhost:4000";
 
 async function getClasses(): Promise<{
   classes: SchoolClass[];
+  grades: string[];
   schedules: ClassSchedule[];
   subjects: ClassSubject[];
   teachers: ClassScheduleTeacher[];
@@ -47,6 +48,7 @@ async function getClasses(): Promise<{
 
   const [
     classesResponse,
+    gradesResponse,
     rostersResponse,
     schedulesResponse,
     recessResponse,
@@ -55,6 +57,7 @@ async function getClasses(): Promise<{
     teachersResponse,
   ] = await Promise.all([
     fetch(`${apiUrl}/school-structure/classes`, { headers, cache: "no-store" }),
+    fetch(`${apiUrl}/school-structure/grades`, { headers, cache: "no-store" }),
     fetch(`${apiUrl}/school-structure/classes/rosters`, { headers, cache: "no-store" }),
     fetch(`${apiUrl}/schedules`, { headers, cache: "no-store" }),
     fetch(`${apiUrl}/settings/school-recess`, { headers, cache: "no-store" }),
@@ -65,6 +68,8 @@ async function getClasses(): Promise<{
   if (
     classesResponse.status === 401 ||
     classesResponse.status === 403 ||
+    gradesResponse.status === 401 ||
+    gradesResponse.status === 403 ||
     rostersResponse.status === 401 ||
     rostersResponse.status === 403 ||
     schedulesResponse.status === 401 ||
@@ -82,6 +87,7 @@ async function getClasses(): Promise<{
   }
   if (
     !classesResponse.ok ||
+    !gradesResponse.ok ||
     !rostersResponse.ok ||
     !schedulesResponse.ok ||
     !recessResponse.ok ||
@@ -91,8 +97,9 @@ async function getClasses(): Promise<{
   ) {
     throw new Error("Não foi possível carregar as turmas e seus horários.");
   }
-  const [classes, rosters, schedules, recess, classSessions, subjects, teachers] = await Promise.all([
+  const [classes, grades, rosters, schedules, recess, classSessions, subjects, teachers] = await Promise.all([
     classesResponse.json() as Promise<SchoolClass[]>,
+    gradesResponse.json() as Promise<string[]>,
     rostersResponse.json() as Promise<Array<{
       classId: string;
       students: NonNullable<SchoolClass["students"]>;
@@ -113,6 +120,7 @@ async function getClasses(): Promise<{
       students: rostersByClass.get(schoolClass.id)?.students ?? [],
       teachers: rostersByClass.get(schoolClass.id)?.teachers ?? [],
     })),
+    grades,
     schedules,
     subjects,
     teachers,
@@ -130,7 +138,7 @@ export default function ClassesPage() {
 }
 
 async function ClassesDashboard() {
-  const { classes, schedules, subjects, teachers, recess, classSessions } = await getClasses();
+  const { classes, grades, schedules, subjects, teachers, recess, classSessions } = await getClasses();
   const cookieStore = await cookies();
   const sessionResponse = await fetch(`${apiUrl}/auth/me`, {
     headers: { cookie: cookieStore.toString() },
@@ -206,6 +214,7 @@ async function ClassesDashboard() {
 
         <ClassForm
           initialClasses={classes}
+          grades={grades}
           initialSchedules={schedules}
           subjects={subjects}
           teachers={teachers}
